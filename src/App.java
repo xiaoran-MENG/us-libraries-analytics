@@ -56,8 +56,9 @@ public final class App {
 // Queries
 final class Analytics {
 
-    private long startTime = System.currentTimeMillis();
+    private long cacheLastRefreshedTime = System.currentTimeMillis();
     private final Map<String, String> cache = new HashMap<>();
+    private final Connection connection;
 
     private final Map<String, Runnable> registry = new HashMap<>() {{
         put("a", () -> query1());
@@ -75,10 +76,11 @@ final class Analytics {
         Q3 = "select top 10000 * from schools " +
             "left join states on schools.state_code = states.state_code";
 
+        Q4 = "select top 10000 * school_name, state_code" + 
+            "left join states on schools.state_code = states.state_code";
+
             
     }
-
-    private final Connection connection;
 
     private Analytics(Connection connection) {
         this.connection = connection;
@@ -88,8 +90,8 @@ final class Analytics {
     public void executeQuery(String key) {
         ExecutionTimer.measure(() -> {
             registry
-            .getOrDefault(key, () -> System.out.println("The key is not found"))
-            .run();
+                .getOrDefault(key, () -> System.out.println("The key is not found"))
+                .run();
         });
     }
 
@@ -110,12 +112,12 @@ final class Analytics {
     }
 
     private void query3() {
-        System.out.println("Q3");
+        System.out.println("Q4");
 
-        if (applyCacheIfPresent("c")) return;
+        if (applyCacheIfPresent("d")) return;
 
         try {
-            PreparedStatement statement = connection.prepareStatement(Query.Q3);
+            PreparedStatement statement = connection.prepareStatement(Query.Q4);
             // statement.setInt(1, Integer.parseInt(id));
             ResultSet resultSet = statement.executeQuery();
 
@@ -134,7 +136,7 @@ final class Analytics {
                 // 		" |";
                 // System.out.println(result);
             }
-            cache.put("c", results.stream().collect(Collectors.joining(Delimiter.NEW_LINE)));
+            cache.put("d", results.stream().collect(Collectors.joining(Delimiter.NEW_LINE)));
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
@@ -179,15 +181,14 @@ final class Analytics {
     }
 
     private void ensureCacheRefreshed() {
-        if (getElapsedTimeInMinutes() > 0.2) {
+        if (getCacheLifeSpanSinceLastRefreshedInMinutes() > 0.5) {
             cache.clear();
-            startTime = System.currentTimeMillis();
+            cacheLastRefreshedTime = System.currentTimeMillis();
         }
     }
 
-    private double getElapsedTimeInMinutes() {
-        double elapsed = (System.currentTimeMillis() - startTime) / 1000.0;
-        System.out.println("Elapsed: " + elapsed / 60);
+    private double getCacheLifeSpanSinceLastRefreshedInMinutes() {
+        double elapsed = (System.currentTimeMillis() - cacheLastRefreshedTime) / 1000.0;
         return elapsed / 60;
     }
 
