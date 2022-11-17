@@ -74,7 +74,7 @@ final class Analytics {
         Q2 = "select top 10000 * from schools",
         
         Q3 = "select top 10000 * from schools " +
-            "left join states on schools.state_code = states.state_code";
+            "left join states on schools.state_code = states.state_code",
 
         Q4 = "select top 10000 * school_name, state_code" + 
             "left join states on schools.state_code = states.state_code";
