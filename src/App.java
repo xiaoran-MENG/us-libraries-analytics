@@ -48,7 +48,7 @@ public final class App {
         System.out.println("Options");
         System.out.println("a - Get this thing");
         System.out.println("b - Get that thing");
-        System.out.println("c - Get that thing");
+        System.out.println("d - Get that thing");
         System.out.println("q - End");
     }
 }
@@ -63,7 +63,7 @@ final class Analytics {
     private final Map<String, Runnable> registry = new HashMap<>() {{
         put("a", () -> query1());
         put("b", () -> query2());
-        put("c", () -> query3());
+        put("d", () -> query3());
     }};
 
     private static class Query {
@@ -76,7 +76,7 @@ final class Analytics {
         Q3 = "select top 10000 * from schools " +
             "left join states on schools.state_code = states.state_code",
 
-        Q4 = "select top 10000 * school_name, state_code" + 
+        Q4 = "select top 10000 * school_name, state_code from schools" + 
             "left join states on schools.state_code = states.state_code";
 
             
@@ -102,10 +102,6 @@ final class Analytics {
             connection = DriverManager.getConnection(SqlServerUtils.connectionUrl(username, password));
         } catch (SQLException e) {
             e.printStackTrace();
-        }
-
-        if (connection == null) {
-            throw new RuntimeException("Failed to set up connection to SQL Server");
         }
 
         return new Analytics(connection);
