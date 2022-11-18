@@ -3,6 +3,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.Properties;
 import java.util.Scanner;
+import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -15,7 +16,9 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.ResultSet;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -23,14 +26,14 @@ public final class App {
 
     public static void main(String[] args) {
         DbConfig config = ConfigReader.read("auth.cfg");
-        // initDb(config.getUsername(), config.getPassword());
+        // loadDb(config.getUsername(), config.getPassword());
         Analytics
             .init(config.getUsername(), config.getPassword())
             .run();
     }
 
-    private static void initDb(String username, String password) {
-        Task.run(() -> new DbLoader(SqlServerUtils.connectionUrl(username, password)).load());
+    private static void loadDb(String username, String password) {
+        SpeedTuner.run(() -> new DbLoader(SqlServerUtils.connectionUrl(username, password)).load());
     }
 }
 
@@ -41,72 +44,106 @@ final class Analytics {
     private final Map<String, String> cache = new HashMap<>();
     private final Connection connection;
 
-    private final Map<String, QueryRunner> registry = new HashMap<>() {{
-        put("1", QueryRunner.noFilter(Query.ALL_LIBRARIES, query -> query1(query)));
-        put("5", QueryRunner.withFilters(Query.TOP_5000_LIBRARIES_BY_ID, (query, filters) -> query5(query, filters), 1));
+    private final Map<String, QueryEngine> registry = new HashMap<>() {{
+        put("1", QueryEngine.useQuery(Query.TEST, query -> query1(query)));
+        put("5", QueryEngine.useQuery(
+            Query.TOP_5000_LIBRARIES_BY_ID, 
+            (query, filters) -> query5(query, filters), 
+            "library_id1", "library_id2"));
     }};
 
     private static class Query {
+
         public static final String
 
-            ALL_LIBRARIES = "select * from libraries",
+            TEST = "select s.state_code, count(library_id) as count from libraries as l left join states as s on l.state_code = s.state_code group by s.state_code",
             
-            TOP_5000_LIBRARIES_BY_ID = "select top 5000 * from libraries where library_id = ?";
-
+            TOP_5000_LIBRARIES_BY_ID = "select top 5000 * from libraries where library_id = ? or library_id = ?";
+            
     }
 
-    private static class QueryRunner {
+    private static class QueryEngine {
+
         private String query;
-        private boolean isFiltered;
+        private Consumer<String> queryExecutor;
+        private BiConsumer<String, String[]> queryWithParametersExecutor;
+        private Set<String> parameters = new HashSet<>();
 
-        private Consumer<String> action;
-
-        private BiConsumer<String, String[]> actionWithFilters;
-        private int filtersCount;
-
-
-        private QueryRunner(String query, Consumer<String> action) {
+        private QueryEngine(String query, Consumer<String> queryExecutor) {
             this.query = query;
-            this.action = action;
+            this.queryExecutor = queryExecutor;
         }
 
-        private QueryRunner(String query, BiConsumer<String, String[]> actionWithFilter, int filtersCount) {
-            this.isFiltered = true;
+        private QueryEngine(String query, BiConsumer<String, String[]> queryWithParametersExecutor, String...parameters) {
             this.query = query;
-            this.actionWithFilters = actionWithFilter;
-            this.filtersCount = filtersCount;
+            this.queryWithParametersExecutor = queryWithParametersExecutor;
+            Collections.addAll(this.parameters, parameters);
         }
 
-        public boolean isFiltered() {
-            return isFiltered;
+        private static QueryEngine useQuery(String query, Consumer<String> queryExecutor) {
+            return new QueryEngine(query, queryExecutor);
         }
 
-        public int getFiltersCount() {
-            return filtersCount;
-        }
-
-        private static QueryRunner noFilter(String query, Consumer<String> action) {
-            return new QueryRunner(query, action);
-        }
-
-        private static QueryRunner withFilters(String query, BiConsumer<String, String[]> actionWithFilter, int filtersCount) {
-            return new QueryRunner(query, actionWithFilter, filtersCount);
+        private static QueryEngine useQuery(String query, BiConsumer<String, String[]> queryWithParametersExecutor, String...parameters) {
+            return new QueryEngine(query, queryWithParametersExecutor, parameters);
         }
 
         public void run() {
-            action.accept(query);
+            if (parameters.size() > 0) {
+                runQueryWithParameters();
+            } else {
+                runQuery();
+            }
         }
 
-        public void run(String[] filters) {
-            actionWithFilters.accept(query, filters);
+        private void runQuery() {
+            SpeedTuner.run(() -> queryExecutor.accept(query));
+        }
+
+        private void runQueryWithParameters() {
+            System.out.println("\nYou have selected a query with filters");
+            displayFilters();
+            Scanner scanner = new Scanner(System.in);
+            String input = scanner.nextLine();
+            String[] filters = input.trim().split(Delimiter.TAB);
+        
+            int retry = 3;
+            do {
+        
+                if (this.parameters.size() == filters.length) {
+                    SpeedTuner.run(parameters -> queryWithParametersExecutor.accept(query, parameters), filters);
+                    break;
+                }
+        
+                retry--;
+        
+                System.out.println("\nThe filters count is not valid");
+                System.out.println("... ... ...");
+                System.out.println("\nYou have " + retry + " times left for retry");
+                
+                if (retry != 0) {
+                    displayFilters();
+                    input = scanner.nextLine();
+                    filters = input.trim().split(Delimiter.TAB);
+                }
+
+            } while (retry != 0);
+
+            scanner.close();
+        }
+
+        public void displayFilters() {
+            System.out.println("\nFilters count: " + parameters.size());
+            System.out.println("\nPlease enter a value for each of the filters separated by TAB");
+            parameters.forEach(filter -> System.out.print(filter + " "));
+            System.out.println();
+            System.out.println();
         }
     }
 
     private Analytics(Connection connection) {
         this.connection = connection;
     }
-
-    
 
     public static Analytics init(String username, String password) {
         Connection connection = null;
@@ -133,42 +170,11 @@ final class Analytics {
                 continue;
             }
 
-            String key = inputs[0];
-
-            if (registry.containsKey(key)) {
-                Analytics.QueryRunner runner = registry.get(key);
-                if (runner.isFiltered()) {
-                    System.out.println("\nPlease enter the filters separated by space");
-                    line = scanner.nextLine();
-                    String[] filters = line.trim().split(Delimiter.SPACE);
-
-                    int retry = 3;
-                    do {
-
-                        if (runner.getFiltersCount() == filters.length) {
-                            Task.run(runner::run, filters);
-                            break;
-                        }
-
-                        retry--;
-
-                        System.out.println("\nThe filters count is not valid");
-                        System.out.println("... ... ...");
-                        System.out.println("\nYou have " + retry + " times left for retry");
-                        
-                        if (retry != 0) {
-                            System.out.println("\nPlease enter the query parameters separated by space");
-                            line = scanner.nextLine();
-                            filters = line.trim().split(Delimiter.SPACE);
-                        }
-                    } while (retry != 0);
-
-                } else {
-                    Task.run(runner::run);
-                }
-            } else {
-                System.out.println("\nThe selected option is not in our directory");
-            }
+            registry.getOrDefault(inputs[0], 
+                QueryEngine.useQuery(
+                    "\nThe option is not on our directory", 
+                    query -> System.out.println(query))
+            ).run();
 
             displayReportsDirectory();
             line = scanner.nextLine();
@@ -177,25 +183,23 @@ final class Analytics {
         scanner.close();
     }
 
-    
-
     private void query5(String query, String[] parameters) {
-        System.out.println("Q5");
         try {
             PreparedStatement statement = connection.prepareStatement(query);
             statement.setString(1, parameters[0]);
+            statement.setString(2, parameters[1]);
             ResultSet resultSet = statement.executeQuery();
             List<String> results = new ArrayList<>();
-            boolean isFound = false;
             while (resultSet.next()) {
-                isFound = true;
-                String result = resultSet.getString("library_name");
+                String result = "| " + resultSet.getString("library_name") + " |";
                 results.add(result);
-                System.out.println(result);
             }
-
-            if (!isFound) {
-                displayNotFound();
+            
+            if (results.isEmpty()) displayNotFound();
+            else {
+                System.out.println("| Libary |");
+                String table = results.stream().collect(Collectors.joining(Delimiter.NEW_LINE));
+                System.out.println(table);
             }
         } catch (SQLException e) {
             throw new RuntimeException(e);
@@ -203,24 +207,26 @@ final class Analytics {
     }
 
     private void query1(String query) {
-        System.out.println("Q1");
 
-        if (applyCacheIfPresent("a")) return;
+        if (applyCacheIfPresent("1")) return;
 
         try {
             PreparedStatement statement = connection.prepareStatement(query);
             ResultSet resultSet = statement.executeQuery();
             List<String> results = new ArrayList<>();
             while (resultSet.next()) {
-                String result = resultSet.getString("library_name");
+                String result = "| " + 
+                    resultSet.getString("state_code") + " | " +
+                    resultSet.getInt("count") + " |";
                 results.add(result);
-                System.out.println(result);
             }
-            
-            if (results.size() > 0) {
-                cache.put("a", results.stream().collect(Collectors.joining(Delimiter.NEW_LINE)));
-            } else {
-                displayNotFound();
+
+            if (results.isEmpty()) displayNotFound();
+            else {
+                System.out.println("| Libary |");
+                String table = results.stream().collect(Collectors.joining(Delimiter.NEW_LINE));
+                System.out.println(table);
+                cache.put("1", table);
             }
         } catch (SQLException e) {
             throw new RuntimeException(e);
@@ -759,25 +765,21 @@ final class DbConfig {
 }
 
 // Util
-final class Task {
+final class SpeedTuner {
     
-    public static <T> void run(Consumer<T> consumer, T t) {
+    public static <T> void run(Consumer<T> consumer, T element) {
         long start = System.currentTimeMillis();
-
-        consumer.accept(t);
-
-        double elapsed = (System.currentTimeMillis() - start) / 1000.0;
-        System.out.println();
-        String result = "Minutes: " + elapsed / 60 + " | " + "Seconds: " + elapsed;
-        System.out.println(result);
-        System.out.println();
+        consumer.accept(element);
+        displayMetrics(start);
     }
 
     public static <T> void run(Runnable action) {
         long start = System.currentTimeMillis();
-
         action.run();
+        displayMetrics(start);
+    }
 
+    private static void displayMetrics(long start) {
         double elapsed = (System.currentTimeMillis() - start) / 1000.0;
         System.out.println();
         String result = "Minutes: " + elapsed / 60 + " | " + "Seconds: " + elapsed;
