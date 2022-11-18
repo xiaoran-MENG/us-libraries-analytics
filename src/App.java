@@ -31,27 +31,19 @@ public final class App {
     }
 
     private static void loadDb(String username, String password) {
-        SpeedTuner.run(() -> DbLoader.up(SqlServerUtils.connectionUrl(username, password)).run());
+        Benchmark.run(() -> DbLoader.up(SqlServerUtils.connectionUrl(username, password)).run());
     }
 }
 
 // Queries
 final class Analytics {
 
-    private long cacheLastCleared = System.currentTimeMillis();
-    private final Map<String, String> cache = new HashMap<>();
     private final Connection connection;
 
-    private final Map<String, QueryExecutor> queryExecutors = new HashMap<>() {{
+    private final Map<String, String> cache = new HashMap<>();
+    private long cacheLastCleared = System.currentTimeMillis();
 
-        put("1", QueryExecutor.toRun(Query.TEST, 
-            query -> query1(query)));
-
-        put("5", QueryExecutor.toRun(Query.TOP_5000_LIBRARIES_BY_ID, 
-            (query, args) -> query5(query, args), 
-            "library_id1", "library_id2"));
-
-    }};
+    private final Map<String, QueryExecutor> queryExecutors = new HashMap<>();
 
     private static class Query {
 
@@ -98,7 +90,7 @@ final class Analytics {
         }
 
         private void runQuery() {
-            SpeedTuner.run(() -> executing.accept(query));
+            Benchmark.run(() -> executing.accept(query));
         }
 
         private void runQueryWithArgs() {
@@ -111,7 +103,7 @@ final class Analytics {
             do {
         
                 if (this.args.size() == inputs.length) {
-                    SpeedTuner.run(params -> executingWithArgs.accept(query, params), inputs);
+                    Benchmark.run(params -> executingWithArgs.accept(query, params), inputs);
                     break;
                 }
         
@@ -146,6 +138,21 @@ final class Analytics {
 
     private Analytics(Connection connection) {
         this.connection = connection;
+        registerQueryExecutors();
+    }
+
+    private void registerQueryExecutors() {
+
+        queryExecutors.put(generateQueryKey(), QueryExecutor.toRun(Query.TEST, 
+            query -> query1(query)));
+
+        queryExecutors.put(generateQueryKey(), QueryExecutor.toRun(Query.TOP_5000_LIBRARIES_BY_ID, 
+            (query, args) -> query5(query, args), 
+            "library_id1", "library_id2"));
+    }
+
+    private String generateQueryKey() {
+        return Integer.valueOf(queryExecutors.size() + 1).toString();
     }
 
     public static Analytics up(String username, String password) {
@@ -161,7 +168,9 @@ final class Analytics {
     }
 
     public void run() {
+
         displayReportsDirectory();
+
         Scanner scanner = new Scanner(System.in);
         String line = scanner.nextLine();
         while (line != null && !line.equals("q")) {
@@ -173,11 +182,11 @@ final class Analytics {
                 continue;
             }
 
-            queryExecutors.getOrDefault(inputs[0], 
-                QueryExecutor.toRun(
-                    "\nThe option is not on our directory", 
-                    query -> System.out.println(query))
-            ).run();
+            queryExecutors
+                .getOrDefault(inputs[0], QueryExecutor.toRun(
+                        "\nThe option is not on our directory", 
+                        query -> System.out.println(query))
+                ).run();
 
             displayReportsDirectory();
             line = scanner.nextLine();
@@ -371,7 +380,11 @@ abstract class TableSeeder {
     public void seed() {
         try {
             Connection connection = DriverManager.getConnection(connectionUrl);
-            if (isTableSeeded(connection, table)) return;
+
+            if (isTableSeeded(connection, table)) {
+                return;
+            }
+
             runBatch(connection);
             connection.close();
         }
@@ -777,7 +790,7 @@ final class DbConfig {
 }
 
 // Util
-final class SpeedTuner {
+final class Benchmark {
     
     public static <T> void run(Consumer<T> consumer, T element) {
         long start = System.currentTimeMillis();
