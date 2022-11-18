@@ -101,41 +101,43 @@ final class Analytics {
         }
 
         private void runQueryWithParameters() {
-            System.out.println("\nYou have selected a query with filters");
-            displayFilters();
+            displayParameters();
             Scanner scanner = new Scanner(System.in);
-            String input = scanner.nextLine();
-            String[] filters = input.trim().split(Delimiter.TAB);
+            String line = scanner.nextLine();
+            String[] inputs = line.trim().split(Delimiter.TAB);
         
             int retry = 3;
             do {
         
-                if (this.parameters.size() == filters.length) {
-                    SpeedTuner.run(parameters -> queryWithParametersExecutor.accept(query, parameters), filters);
+                if (this.parameters.size() == inputs.length) {
+                    SpeedTuner.run(params -> queryWithParametersExecutor.accept(query, params), inputs);
                     break;
                 }
         
                 retry--;
-        
-                System.out.println("\nThe filters count is not valid");
-                System.out.println("... ... ...");
-                System.out.println("\nYou have " + retry + " times left for retry");
+                displayRetryMessage(retry);
                 
-                if (retry != 0) {
-                    displayFilters();
-                    input = scanner.nextLine();
-                    filters = input.trim().split(Delimiter.TAB);
+                if (retry > 0) {
+                    displayParameters();
+                    line = scanner.nextLine();
+                    inputs = line.trim().split(Delimiter.TAB);
                 }
 
-            } while (retry != 0);
+            } while (retry > 0);
 
             scanner.close();
         }
 
-        public void displayFilters() {
-            System.out.println("\nFilters count: " + parameters.size());
-            System.out.println("\nPlease enter a value for each of the filters separated by TAB");
-            parameters.forEach(filter -> System.out.print(filter + " "));
+        private void displayRetryMessage(int retry) {
+            System.out.println("\nThe parameters count is not valid");
+            System.out.println("\nYou have " + retry + " times left for retry");
+        }
+
+        public void displayParameters() {
+            System.out.println("\nYou have selected a query with parameters");
+            System.out.println("\nParameters count: " + parameters.size());
+            System.out.println("\nPlease enter a value for each of the parameters separated by TAB");
+            parameters.forEach(parameter -> System.out.print(parameter + " "));
             System.out.println();
             System.out.println();
         }
@@ -195,11 +197,11 @@ final class Analytics {
                 results.add(result);
             }
             
-            if (results.isEmpty()) displayNotFound();
-            else {
+            if (results.isEmpty()) {
+                displayNotFound();
+            } else {
                 System.out.println("| Libary |");
-                String table = results.stream().collect(Collectors.joining(Delimiter.NEW_LINE));
-                System.out.println(table);
+                System.out.println(joinResults(results));
             }
         } catch (SQLException e) {
             throw new RuntimeException(e);
@@ -221,16 +223,21 @@ final class Analytics {
                 results.add(result);
             }
 
-            if (results.isEmpty()) displayNotFound();
-            else {
+            if (results.isEmpty()) {
+                displayNotFound();
+            } else {
                 System.out.println("| Libary |");
-                String table = results.stream().collect(Collectors.joining(Delimiter.NEW_LINE));
+                String table = joinResults(results);
                 System.out.println(table);
                 cache.put("1", table);
             }
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private String joinResults(List<String> results) {
+        return results.stream().collect(Collectors.joining(Delimiter.NEW_LINE));
     }
 
     private boolean applyCacheIfPresent(String key) {
@@ -259,7 +266,7 @@ final class Analytics {
     }
 
     private void displayNotFound() {
-        System.out.println("\nNo records are found\n");
+        System.out.println("\n\n - - - No records are found - - -\n\n");
     }
 }
 
