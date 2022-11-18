@@ -6,5 +6,5 @@
 - Drag everything including App.java under `src` into a single folder on WinSCP
 - Log into Aviary in command prompt
 - `cd` into the project directory
-8. Run `make`
-9. If successful, run `make run`
+- Run `make`
+- If successful, run `make run`
