@@ -27,13 +27,11 @@ public final class App {
     public static void main(String[] args) {
         DbConfig config = ConfigReader.read("auth.cfg");
         // loadDb(config.getUsername(), config.getPassword());
-        Analytics
-            .init(config.getUsername(), config.getPassword())
-            .run();
+        Analytics.up(config.getUsername(), config.getPassword()).run();
     }
 
     private static void loadDb(String username, String password) {
-        SpeedTuner.run(() -> new DbLoader(SqlServerUtils.connectionUrl(username, password)).load());
+        SpeedTuner.run(() -> DbLoader.up(SqlServerUtils.connectionUrl(username, password)).run());
     }
 }
 
@@ -44,12 +42,15 @@ final class Analytics {
     private final Map<String, String> cache = new HashMap<>();
     private final Connection connection;
 
-    private final Map<String, QueryEngine> registry = new HashMap<>() {{
-        put("1", QueryEngine.useQuery(Query.TEST, query -> query1(query)));
-        put("5", QueryEngine.useQuery(
-            Query.TOP_5000_LIBRARIES_BY_ID, 
-            (query, filters) -> query5(query, filters), 
+    private final Map<String, QueryExecutor> queryExecutors = new HashMap<>() {{
+
+        put("1", QueryExecutor.toRun(Query.TEST, 
+            query -> query1(query)));
+
+        put("5", QueryExecutor.toRun(Query.TOP_5000_LIBRARIES_BY_ID, 
+            (query, args) -> query5(query, args), 
             "library_id1", "library_id2"));
+
     }};
 
     private static class Query {
@@ -62,46 +63,46 @@ final class Analytics {
             
     }
 
-    private static class QueryEngine {
+    private static class QueryExecutor {
 
         private String query;
-        private Consumer<String> queryExecutor;
-        private BiConsumer<String, String[]> queryWithParametersExecutor;
-        private Set<String> parameters = new HashSet<>();
+        private Consumer<String> executing;
+        private BiConsumer<String, String[]> executingWithArgs;
+        private Set<String> args = new HashSet<>();
 
-        private QueryEngine(String query, Consumer<String> queryExecutor) {
+        private QueryExecutor(String query, Consumer<String> executing) {
             this.query = query;
-            this.queryExecutor = queryExecutor;
+            this.executing = executing;
         }
 
-        private QueryEngine(String query, BiConsumer<String, String[]> queryWithParametersExecutor, String...parameters) {
+        private QueryExecutor(String query, BiConsumer<String, String[]> executingWithArgs, String...args) {
             this.query = query;
-            this.queryWithParametersExecutor = queryWithParametersExecutor;
-            Collections.addAll(this.parameters, parameters);
+            this.executingWithArgs = executingWithArgs;
+            Collections.addAll(this.args, args);
         }
 
-        private static QueryEngine useQuery(String query, Consumer<String> queryExecutor) {
-            return new QueryEngine(query, queryExecutor);
+        private static QueryExecutor toRun(String query, Consumer<String> executing) {
+            return new QueryExecutor(query, executing);
         }
 
-        private static QueryEngine useQuery(String query, BiConsumer<String, String[]> queryWithParametersExecutor, String...parameters) {
-            return new QueryEngine(query, queryWithParametersExecutor, parameters);
+        private static QueryExecutor toRun(String query, BiConsumer<String, String[]> executingWithArgs, String...args) {
+            return new QueryExecutor(query, executingWithArgs, args);
         }
 
         public void run() {
-            if (parameters.size() > 0) {
-                runQueryWithParameters();
+            if (args.size() > 0) {
+                runQueryWithArgs();
             } else {
                 runQuery();
             }
         }
 
         private void runQuery() {
-            SpeedTuner.run(() -> queryExecutor.accept(query));
+            SpeedTuner.run(() -> executing.accept(query));
         }
 
-        private void runQueryWithParameters() {
-            displayParameters();
+        private void runQueryWithArgs() {
+            displayQueryArgs();
             Scanner scanner = new Scanner(System.in);
             String line = scanner.nextLine();
             String[] inputs = line.trim().split(Delimiter.TAB);
@@ -109,8 +110,8 @@ final class Analytics {
             int retry = 3;
             do {
         
-                if (this.parameters.size() == inputs.length) {
-                    SpeedTuner.run(params -> queryWithParametersExecutor.accept(query, params), inputs);
+                if (this.args.size() == inputs.length) {
+                    SpeedTuner.run(params -> executingWithArgs.accept(query, params), inputs);
                     break;
                 }
         
@@ -118,7 +119,7 @@ final class Analytics {
                 displayRetryMessage(retry);
                 
                 if (retry > 0) {
-                    displayParameters();
+                    displayQueryArgs();
                     line = scanner.nextLine();
                     inputs = line.trim().split(Delimiter.TAB);
                 }
@@ -129,15 +130,15 @@ final class Analytics {
         }
 
         private void displayRetryMessage(int retry) {
-            System.out.println("\nThe parameters count is not valid");
+            System.out.println("\nThe args count is not valid");
             System.out.println("\nYou have " + retry + " times left for retry");
         }
 
-        public void displayParameters() {
-            System.out.println("\nYou have selected a query with parameters");
-            System.out.println("\nParameters count: " + parameters.size());
-            System.out.println("\nPlease enter a value for each of the parameters separated by TAB");
-            parameters.forEach(parameter -> System.out.print(parameter + " "));
+        public void displayQueryArgs() {
+            System.out.println("\nYou have selected a query with args");
+            System.out.println("\nArgs count: " + args.size());
+            System.out.println("\nPlease enter a value for each of the args separated by TAB");
+            args.forEach(arg -> System.out.print(arg + " "));
             System.out.println();
             System.out.println();
         }
@@ -147,7 +148,7 @@ final class Analytics {
         this.connection = connection;
     }
 
-    public static Analytics init(String username, String password) {
+    public static Analytics up(String username, String password) {
         Connection connection = null;
 
         try {
@@ -172,8 +173,8 @@ final class Analytics {
                 continue;
             }
 
-            registry.getOrDefault(inputs[0], 
-                QueryEngine.useQuery(
+            queryExecutors.getOrDefault(inputs[0], 
+                QueryExecutor.toRun(
                     "\nThe option is not on our directory", 
                     query -> System.out.println(query))
             ).run();
@@ -185,11 +186,11 @@ final class Analytics {
         scanner.close();
     }
 
-    private void query5(String query, String[] parameters) {
+    private void query5(String query, String[] args) {
         try {
             PreparedStatement statement = connection.prepareStatement(query);
-            statement.setString(1, parameters[0]);
-            statement.setString(2, parameters[1]);
+            statement.setString(1, args[0]);
+            statement.setString(2, args[1]);
             ResultSet resultSet = statement.executeQuery();
             List<String> results = new ArrayList<>();
             while (resultSet.next()) {
@@ -274,19 +275,23 @@ final class Analytics {
 final class DbLoader {
 
     private String connectionUrl;
-    private TableSeedersExecutor executor;
+    private TableSeedersExecutor tableSeedersExecutor;
     
-    public DbLoader(String connectionUrl) {
+    private DbLoader(String connectionUrl) {
         this.connectionUrl = connectionUrl;
-        this.executor = new TableSeedersExecutor(connectionUrl);
+        this.tableSeedersExecutor = new TableSeedersExecutor(connectionUrl);
     }
 
-    public void load() {
-        init();
-        executor.run();
+    public static DbLoader up(String connectionUrl) {
+        return new DbLoader(connectionUrl);
     }
 
-    private void init() {
+    public void run() {
+        createTablesIfAbsent();
+        tableSeedersExecutor.run();
+    }
+
+    private void createTablesIfAbsent() {
         String[] sql = SqlReader.read("command.sql");
 
         if (sql.length == 0) return;
