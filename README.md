@@ -1,5 +1,6 @@
 # comp3380-group-project
 
+0. Open the repo in VS Code and change the username and password in auth.cfg into yours
 1. Open up WinSCP
 2. Log into WinSCP
 3. Create a directory for the group project under your directory for COMP 3380
