@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 
 public final class App {
+
     public static void main(String[] args) {
         DbConfig config = ConfigReader.read("auth.cfg");
         // initDb(config.getUsername(), config.getPassword());
@@ -44,6 +45,7 @@ public final class App {
         scanner.close();
     }
 
+    // Todo: Options reload
     private static void printReportOptions() {
         System.out.println("Options");
         System.out.println("a - Get this thing");
@@ -76,10 +78,10 @@ final class Analytics {
         Q3 = "select top 10000 * from schools " +
             "left join states on schools.state_code = states.state_code",
 
-        Q4 = "select top 10000 * school_name, state_code from schools" + 
-            "left join states on schools.state_code = states.state_code";
+        Q4 = "select top 10000 school_name, states.state_code from schools " + 
+            "left join states on schools.state_code = states.state_code",
 
-            
+        Q5 = "";          
     }
 
     private Analytics(Connection connection) {
