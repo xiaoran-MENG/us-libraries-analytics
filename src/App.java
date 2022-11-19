@@ -39,10 +39,9 @@ public final class App {
 final class Analytics {
 
     private final Connection connection;
-
+    
     private final Map<String, String> cache = new HashMap<>();
     private long cacheLastCleared = System.currentTimeMillis();
-
     private final Map<String, QueryExecutor> queryExecutors = new HashMap<>();
 
     private static class Query {
@@ -51,7 +50,20 @@ final class Analytics {
 
             TEST = "select s.state_code, count(library_id) as count from libraries as l left join states as s on l.state_code = s.state_code group by s.state_code",
             
-            TOP_5000_LIBRARIES_BY_ID = "select top 5000 * from libraries where library_id = ? or library_id = ?";
+            TOP_5000_LIBRARIES_BY_ID = "select top 5000 * from libraries where library_id = ? or library_id = ?",
+
+            top_10_counties_ordered_by_libraries_count_then_by_schools_count = 
+                "select top 10 " +
+                    "counties.county_code, " +
+                    "counties.state_code, " +
+                    "count(distinct schools.school_code) as schools_count, " +
+                    "count(distinct libraries.library_id) as libraries_count " +
+                "from counties " +
+                "join states on counties.state_code = states.state_code " +
+                "join libraries on states.state_code = libraries.state_code and counties.county_code = libraries.county_code " +
+                "join schools on states.state_code = schools.state_code " +
+                "group by counties.county_code, counties.state_code " +
+                "order by libraries_count desc, schools_count desc;";
             
     }
 
@@ -73,11 +85,11 @@ final class Analytics {
             Collections.addAll(this.args, args);
         }
 
-        private static QueryExecutor toRun(String query, Consumer<String> executing) {
+        private static QueryExecutor use(String query, Consumer<String> executing) {
             return new QueryExecutor(query, executing);
         }
 
-        private static QueryExecutor toRun(String query, BiConsumer<String, String[]> executingWithArgs, String...args) {
+        private static QueryExecutor use(String query, BiConsumer<String, String[]> executingWithArgs, String...args) {
             return new QueryExecutor(query, executingWithArgs, args);
         }
 
@@ -142,17 +154,10 @@ final class Analytics {
     }
 
     private void registerQueryExecutors() {
+        queryExecutors.put("1", QueryExecutor.use(Query.TEST, this::query1));
+        queryExecutors.put("2", QueryExecutor.use(Query.TOP_5000_LIBRARIES_BY_ID, this::query2, "library_id1", "library_id2"));
+        queryExecutors.put("3", QueryExecutor.use(Query.top_10_counties_ordered_by_libraries_count_then_by_schools_count, this::query3));
 
-        queryExecutors.put(generateQueryKey(), QueryExecutor.toRun(Query.TEST, 
-            query -> query1(query)));
-
-        queryExecutors.put(generateQueryKey(), QueryExecutor.toRun(Query.TOP_5000_LIBRARIES_BY_ID, 
-            (query, args) -> query5(query, args), 
-            "library_id1", "library_id2"));
-    }
-
-    private String generateQueryKey() {
-        return Integer.valueOf(queryExecutors.size() + 1).toString();
     }
 
     public static Analytics up(String username, String password) {
@@ -183,10 +188,8 @@ final class Analytics {
             }
 
             queryExecutors
-                .getOrDefault(inputs[0], QueryExecutor.toRun(
-                        "\nThe option is not on our directory", 
-                        query -> System.out.println(query))
-                ).run();
+                .getOrDefault(inputs[0], QueryExecutor.use("\nThe option is not on our directory", System.out::println))
+                .run();
 
             displayReportsDirectory();
             line = scanner.nextLine();
@@ -195,7 +198,7 @@ final class Analytics {
         scanner.close();
     }
 
-    private void query5(String query, String[] args) {
+    private void query2(String query, String[] args) {
         try {
             PreparedStatement statement = connection.prepareStatement(query);
             statement.setString(1, args[0]);
@@ -212,6 +215,35 @@ final class Analytics {
             } else {
                 System.out.println("| Libary |");
                 System.out.println(joinResults(results));
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void query3(String query) {
+
+        if (applyCacheIfPresent("3")) return;
+
+        try {
+            PreparedStatement statement = connection.prepareStatement(query);
+            ResultSet resultSet = statement.executeQuery();
+            List<String> results = new ArrayList<>();
+            while (resultSet.next()) {
+                String result = "| " + 
+                    resultSet.getInt("county_code") + " | " +
+                    resultSet.getInt("state_code") + " | " +
+                    resultSet.getInt("schools_count") + " | " +
+                    resultSet.getInt("libraries_count") + " |";
+                results.add(result);
+            }
+
+            if (results.isEmpty()) {
+                displayNotFound();
+            } else {
+                String table = joinResults(results);
+                System.out.println(table);
+                cache.put("3", table);
             }
         } catch (SQLException e) {
             throw new RuntimeException(e);
@@ -269,10 +301,10 @@ final class Analytics {
     private static void displayReportsDirectory() {
         System.out.println("\n         Reports Directory");
         System.out.println("----------------------------------------");
-        System.out.println("1 - Get all libraries");
-        System.out.println("5 - Get a single library with library ID");
+        System.out.println("1 - Q 1");
+        System.out.println("2 - Q 2");
+        System.out.println("3 - Q 3");
         System.out.println("q - End\n");
-        System.out.println("Please make a selection");
     }
 
     private void displayNotFound() {
@@ -917,7 +949,6 @@ final class Table {
 
         T_STATES = "states";
 
-        
 }
 
 final class Insertion {
