@@ -63,7 +63,15 @@ final class Analytics {
                 "join libraries on states.state_code = libraries.state_code and counties.county_code = libraries.county_code " +
                 "join schools on states.state_code = schools.state_code " +
                 "group by counties.county_code, counties.state_code " +
-                "order by libraries_count desc, schools_count desc;";
+                "order by libraries_count desc, schools_count desc;",
+
+            libraries_ordered_by_total_operating_revenue = 
+            "select " +
+                "library_name, " +
+                "(local_government_operating_revenue + state_government_operating_revenue + federal_government_operating_revenue + other_operating_revenue) as total_operating_revenue " +
+            "from libraries " +
+            "join operating_revenues on libraries.operating_revenue_id = operating_revenues.operating_revenue_id " +
+            "order by total_operating_revenue";
             
     }
 
@@ -129,8 +137,6 @@ final class Analytics {
                 }
 
             } while (retry > 0);
-
-            scanner.close();
         }
 
         private void displayRetryMessage(int retry) {
@@ -157,7 +163,7 @@ final class Analytics {
         queryExecutors.put("1", QueryExecutor.use(Query.TEST, this::query1));
         queryExecutors.put("2", QueryExecutor.use(Query.TOP_5000_LIBRARIES_BY_ID, this::query2, "library_id1", "library_id2"));
         queryExecutors.put("3", QueryExecutor.use(Query.top_10_counties_ordered_by_libraries_count_then_by_schools_count, this::query3));
-
+        queryExecutors.put("4", QueryExecutor.use(Query.libraries_ordered_by_total_operating_revenue, this::query4, "n"));
     }
 
     public static Analytics up(String username, String password) {
@@ -196,6 +202,61 @@ final class Analytics {
         }
 
         scanner.close();
+    }
+
+    private final static class Library {
+        final String name;
+        final double totalOperatingRevenue;
+
+        public Library(String name, double totalOperatingRevenue) {
+            this.name = name;
+            this.totalOperatingRevenue = totalOperatingRevenue;
+        }
+
+    }
+
+    private void query4(String query, String[] args) {
+        try {
+            PreparedStatement statement = connection.prepareStatement(query);
+            ResultSet resultSet = statement.executeQuery();
+            List<Library> libraries = new ArrayList<>();
+            while (resultSet.next()) {
+                libraries.add(
+                    new Library(
+                        resultSet.getString("library_name"), 
+                        resultSet.getDouble("total_operating_revenue")
+                    )
+                );
+            }
+
+            double n = Double.parseDouble(args[0]);
+            int i = 0, j = libraries.size() - 1;
+            while (i < j - 1) {
+                int k = i + (j - i) / 2;
+                
+                if (libraries.get(k).totalOperatingRevenue < n) {
+                    i = k;
+                } else {
+                    j = k;
+                }
+            }
+
+            Library result = null, left = libraries.get(i), right = libraries.get(j);
+            if (n < left.totalOperatingRevenue) {
+                result = left;
+            } else if (n > right.totalOperatingRevenue) {
+                result = right;
+            } else {
+                result = n - left.totalOperatingRevenue < right.totalOperatingRevenue - n
+                    ? left
+                    : right;
+            }
+
+            System.out.println("| Library | Total Operating Revenue | n |");
+            System.out.println("| " + result.name + " | " + result.totalOperatingRevenue + " | " + n + " |");
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private void query2(String query, String[] args) {
@@ -304,6 +365,7 @@ final class Analytics {
         System.out.println("1 - Q 1");
         System.out.println("2 - Q 2");
         System.out.println("3 - Q 3");
+        System.out.println("4 - Q 4");
         System.out.println("q - End\n");
     }
 
