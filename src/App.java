@@ -84,7 +84,7 @@ final class UsLibrariesAnalyzer {
 
             int key = Integer.parseInt(inputs[0]);
             queryExecutors
-                .getOrDefault(key, QueryExecutor.notFound())
+                .getOrDefault(key, queryExecutors.get(0))
                 .run();
 
             displayReportsDirectory();
@@ -147,7 +147,7 @@ final class UsLibrariesAnalyzer {
     }
 
     private static final class Query {
-        private static int index = 1;
+        private static int index = 0;
 
         private int key;
         private String header;
@@ -169,41 +169,46 @@ final class UsLibrariesAnalyzer {
         public void body(String body) {
             this.body = body;
         }
+
+        @Override
+        public String toString() {
+            return body;
+        }
     }
 
     private static final class QueryExecutor {
 
-        public static class QueryExecutorBuilder {
+        private static class Builder {
             private Query query;
             private Consumer<Query> execution;
             private BiConsumer<Query, String[]> executionWithArgs;
             private Set<String> args = new HashSet<>();
 
-            public QueryExecutorBuilder() {
+            public Builder() {
                 query = new Query();
             }
 
-            public QueryExecutorBuilder header(String header) {
+            public Builder header(String header) {
                 query.header(header);
                 return this;
             }
 
-            public QueryExecutorBuilder body(String body) {
+            public Builder body(String body) {
                 query.body(body);
                 return this;
             }
 
-            public QueryExecutorBuilder toExecute(Consumer<Query> execution) {
+            public Builder toExecute(Consumer<Query> execution) {
                 this.execution = execution;
                 return this;
             }
 
-            public QueryExecutorBuilder toExecute(BiConsumer<Query, String[]> executionWithArgs) {
+            public Builder toExecute(BiConsumer<Query, String[]> executionWithArgs) {
                 this.executionWithArgs = executionWithArgs;
                 return this;
             }
 
-            public QueryExecutorBuilder args(String... args) {
+            public Builder args(String... args) {
                 Collections.addAll(this.args, args);
                 return this;
             }
@@ -218,7 +223,7 @@ final class UsLibrariesAnalyzer {
         private BiConsumer<Query, String[]> executionWithArgs;
         private Set<String> args = new HashSet<>();
 
-        private QueryExecutor(QueryExecutorBuilder builder) {
+        private QueryExecutor(Builder builder) {
             this.query = builder.query;
             this.execution = builder.execution;
             this.executionWithArgs = builder.executionWithArgs;
@@ -234,15 +239,8 @@ final class UsLibrariesAnalyzer {
             return this.query.key();
         }
 
-        private static QueryExecutorBuilder builder() {
-            return new QueryExecutorBuilder();
-        }
-
-        private static QueryExecutor notFound() {
-            return QueryExecutor.builder()
-                .body("--- The entered option is not in our reports directory ---")
-                .toExecute(query -> System.out.println(query.body))
-                .build();
+        private static Builder builder() {
+            return new Builder();
         }
 
         public void run() {
@@ -309,6 +307,13 @@ final class UsLibrariesAnalyzer {
     private void registerQueryExecutors() {
 
         QueryExecutor executor = QueryExecutor.builder()
+            .header("Not found")
+            .body("Option not found")
+            .toExecute(System.out::println)
+            .build();
+        queryExecutors.put(executor.key(), executor);
+        
+        executor = QueryExecutor.builder()
             .header("Test")
             .body(Sql.test)
             .toExecute(this::query1)
@@ -369,10 +374,10 @@ final class UsLibrariesAnalyzer {
     private void displayReportsDirectory() {
         System.out.println("\n         Reports Directory");
         System.out.println("----------------------------------------");
-
-        queryExecutors
-            .values()
-            .forEach(System.out::println);
+        
+        for (int i = 1; i < queryExecutors.values().size(); i++) {
+            System.out.println(queryExecutors.get(i));
+        }
 
         System.out.println("q - End\n");
         System.out.println("Please make a selection");
