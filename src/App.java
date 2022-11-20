@@ -15,7 +15,10 @@ public final class App {
     }
 
     private static void loadDb(String username, String password) {
-        Benchmark.run(() -> DbLoader.up(SqlServerUtils.connectionUrl(username, password)).run());
+        Benchmark.run(() -> 
+            DbLoader
+                .up(SqlServerUtils.connectionUrl(username, password))
+                .run());
     }
 }
 
