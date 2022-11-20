@@ -27,7 +27,9 @@ public final class App {
     public static void main(String[] args) {
         DbConfig config = ConfigReader.read("auth.cfg");
         // loadDb(config.getUsername(), config.getPassword());
-        Analytics.up(config.getUsername(), config.getPassword()).run();
+        UsLibrariesAnalyzer
+            .connectToDb(config.getUsername(), config.getPassword())
+            .run();
     }
 
     private static void loadDb(String username, String password) {
@@ -36,21 +38,21 @@ public final class App {
 }
 
 // Queries
-final class Analytics {
+final class UsLibrariesAnalyzer {
 
     private final Connection connection;
     private final Map<String, String> cache = new HashMap<>();
     private long cacheLastCleared = System.currentTimeMillis();
-    private final Map<String, QueryExecutor> queryExecutors = new HashMap<>();
+    private final Map<Integer, QueryExecutor> queryExecutors = new HashMap<>();
 
-    public static Analytics up(String username, String password) {
+    public static UsLibrariesAnalyzer connectToDb(String username, String password) {
         Connection connection = null;
 
         try {
             connection = DriverManager.getConnection(SqlServerUtils.connectionUrl(username, password));
         } catch (SQLException e) { }
 
-        return new Analytics(connection);
+        return new UsLibrariesAnalyzer(connection);
     }
 
     public void run() {
@@ -72,8 +74,17 @@ final class Analytics {
                 continue;
             }
 
+            String input = inputs[0];
+            if (!NumbersUtil.isInteger(input)) {
+                System.out.println("--- Please enter a number ---");
+                displayReportsDirectory();
+                line = scanner.nextLine();
+                continue;
+            }
+
+            int key = Integer.parseInt(inputs[0]);
             queryExecutors
-                .getOrDefault(inputs[0], QueryExecutor.toExecute("\nThe option is not on our directory", System.out::println))
+                .getOrDefault(key, QueryExecutor.notFound())
                 .run();
 
             displayReportsDirectory();
@@ -83,7 +94,7 @@ final class Analytics {
         scanner.close();
     }
 
-    private static class SqlQuery {
+    private static class Sql {
 
         public static final String
 
@@ -135,30 +146,103 @@ final class Analytics {
                 "order by average_state_licensed_databases_per_library_for_county";
     }
 
-    private static class QueryExecutor {
+    private static final class Query {
+        private static int index = 1;
 
-        private String query;
-        private Consumer<String> execution;
-        private BiConsumer<String, String[]> executionWithArgs;
+        private int key;
+        private String header;
+        private String body;
+
+        public Query() {
+            this.key = index;
+            index++;
+        }
+
+        public int key() {
+            return this.key;
+        }
+
+        public void header(String header) {
+            this.header = header;
+        }
+
+        public void body(String body) {
+            this.body = body;
+        }
+    }
+
+    private static final class QueryExecutor {
+
+        public static class QueryExecutorBuilder {
+            private Query query;
+            private Consumer<Query> execution;
+            private BiConsumer<Query, String[]> executionWithArgs;
+            private Set<String> args = new HashSet<>();
+
+            public QueryExecutorBuilder() {
+                query = new Query();
+            }
+
+            public QueryExecutorBuilder header(String header) {
+                query.header(header);
+                return this;
+            }
+
+            public QueryExecutorBuilder body(String body) {
+                query.body(body);
+                return this;
+            }
+
+            public QueryExecutorBuilder toExecute(Consumer<Query> execution) {
+                this.execution = execution;
+                return this;
+            }
+
+            public QueryExecutorBuilder toExecute(BiConsumer<Query, String[]> executionWithArgs) {
+                this.executionWithArgs = executionWithArgs;
+                return this;
+            }
+
+            public QueryExecutorBuilder args(String... args) {
+                Collections.addAll(this.args, args);
+                return this;
+            }
+
+            public QueryExecutor build() {
+                return new QueryExecutor(this);
+            }
+        }
+
+        private Query query;
+        private Consumer<Query> execution;
+        private BiConsumer<Query, String[]> executionWithArgs;
         private Set<String> args = new HashSet<>();
 
-        private QueryExecutor(String query, Consumer<String> execution) {
-            this.query = query;
-            this.execution = execution;
+        private QueryExecutor(QueryExecutorBuilder builder) {
+            this.query = builder.query;
+            this.execution = builder.execution;
+            this.executionWithArgs = builder.executionWithArgs;
+            this.args = builder.args;
         }
 
-        private QueryExecutor(String query, BiConsumer<String, String[]> executionWithArgs, String...args) {
-            this.query = query;
-            this.executionWithArgs = executionWithArgs;
-            Collections.addAll(this.args, args);
+        @Override
+        public String toString() {
+            return key() + " " + this.query.header;
         }
 
-        private static QueryExecutor toExecute(String query, Consumer<String> execution) {
-            return new QueryExecutor(query, execution);
+        public int key() {
+            return this.query.key();
         }
 
-        private static QueryExecutor toExecute(String query, BiConsumer<String, String[]> executionWithArgs, String...args) {
-            return new QueryExecutor(query, executionWithArgs, args);
+        private static QueryExecutorBuilder builder() {
+            return new QueryExecutorBuilder();
+        }
+
+        private static QueryExecutor notFound() {
+            return QueryExecutor.builder()
+                .body("--- The entered option is not in our reports directory ---")
+                .toExecute(query -> System.out.println(query.body))
+                .build();
         }
 
         public void run() {
@@ -213,17 +297,89 @@ final class Analytics {
         }
     }
 
-    private Analytics(Connection connection) {
+    private UsLibrariesAnalyzer(Connection connection) {
+        if (connection == null) {
+            throw new RuntimeException("Failed to connect to database");
+        }
+
         this.connection = connection;
         registerQueryExecutors();
     }
 
     private void registerQueryExecutors() {
-        queryExecutors.put("1", QueryExecutor.toExecute(SqlQuery.test, this::query1));
-        queryExecutors.put("2", QueryExecutor.toExecute(SqlQuery.libraries_with_id_of_this_or_that, this::query2, "library_id1", "library_id2"));
-        queryExecutors.put("3", QueryExecutor.toExecute(SqlQuery.top_10_counties_ordered_by_libraries_count_then_by_schools_count, this::query3));
-        queryExecutors.put("4", QueryExecutor.toExecute(SqlQuery.libraries_ordered_by_total_operating_revenue, this::query4, "n"));
-        queryExecutors.put("5", QueryExecutor.toExecute(SqlQuery.average_state_licensed_databases_per_library_for_counties_that_belong_to_states_with_less_than_5_counties, this::query5));
+
+        QueryExecutor executor = QueryExecutor.builder()
+            .header("Test")
+            .body(Sql.test)
+            .toExecute(this::query1)
+            .build();
+        queryExecutors.put(executor.key(), executor);
+
+        executor = QueryExecutor.builder()
+            .header("Top 10 counties ordered by libraries count then by schools count")
+            .body(Sql.top_10_counties_ordered_by_libraries_count_then_by_schools_count)
+            .toExecute(this::query3)
+            .build();
+        queryExecutors.put(executor.key(), executor);
+
+        executor = QueryExecutor.builder()
+            .header("Libraries with id of this or that")
+            .body(Sql.libraries_with_id_of_this_or_that)
+            .toExecute(this::query2)
+            .args("library_id1", "library_id2")
+            .build();
+        queryExecutors.put(executor.key(), executor);
+
+        executor = QueryExecutor.builder()
+            .header("Library with total operating revenue closest to n")
+            .body(Sql.libraries_ordered_by_total_operating_revenue)
+            .toExecute(this::query4)
+            .args("n")
+            .build();
+        queryExecutors.put(executor.key(), executor);
+
+        QueryExecutor.builder()
+            .header("Average state licensed databases per library for counties that belong to states with less than 5 counties")
+            .body(Sql.average_state_licensed_databases_per_library_for_counties_that_belong_to_states_with_less_than_5_counties)
+            .toExecute(this::query5)
+            .build();
+        queryExecutors.put(executor.key(), executor);
+    }
+
+    private String join(List<String> results) {
+        return results.stream().collect(Collectors.joining(Delimiter.NEW_LINE));
+    }
+
+    private boolean applyCacheIfPresent(String key) {
+        ensureCacheRefreshed();
+        String data = cache.getOrDefault(key, null);
+        boolean result = data != null;
+        if (result) System.out.println(data);
+        return result;
+    }
+
+    private void ensureCacheRefreshed() {
+        double elapsedTimeSinceLastCacheClearedInMinutes = ((System.currentTimeMillis() - cacheLastCleared) / 1000.0) / 60;
+        if (elapsedTimeSinceLastCacheClearedInMinutes > 0.2) {
+            cache.clear();
+            cacheLastCleared = System.currentTimeMillis();
+        }
+    }
+
+    private void displayReportsDirectory() {
+        System.out.println("\n         Reports Directory");
+        System.out.println("----------------------------------------");
+
+        queryExecutors
+            .values()
+            .forEach(System.out::println);
+
+        System.out.println("q - End\n");
+        System.out.println("Please make a selection");
+    }
+
+    private void displayNotFound() {
+        System.out.println("\n\n - - - No records are found - - -\n\n");
     }
 
     private final static class Library {
@@ -237,14 +393,14 @@ final class Analytics {
 
     }
 
-    private void query4(String query, String[] args) {
-        if (!isDouble(args[0])) {
+    private void query4(Query query, String[] args) {
+        if (!NumbersUtil.isDouble(args[0])) {
             System.out.println("\n--- The input must be numerical ---");
             return;
         }
 
         try {
-            PreparedStatement statement = connection.prepareStatement(query);
+            PreparedStatement statement = connection.prepareStatement(query.body);
             ResultSet resultSet = statement.executeQuery();
             List<Library> libraries = new ArrayList<>();
             while (resultSet.next()) {
@@ -286,18 +442,9 @@ final class Analytics {
         }
     }
 
-    private boolean isDouble(String str) {
+    private void query2(Query query, String[] args) {
         try {
-            Double.parseDouble(str);
-            return true;
-        } catch (NumberFormatException e) {
-            return false;
-        }
-    }
-
-    private void query2(String query, String[] args) {
-        try {
-            PreparedStatement statement = connection.prepareStatement(query);
+            PreparedStatement statement = connection.prepareStatement(query.body);
             statement.setString(1, args[0]);
             statement.setString(2, args[1]);
             ResultSet resultSet = statement.executeQuery();
@@ -311,19 +458,19 @@ final class Analytics {
                 displayNotFound();
             } else {
                 System.out.println("\n| Libary |");
-                System.out.println(joinResults(results));
+                System.out.println(join(results));
             }
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
     }
 
-    private void query5(String query) {
+    private void query5(Query query) {
 
-        if (applyCacheIfPresent("5")) return;
+        if (applyCacheIfPresent(query.header)) return;
 
         try {
-            PreparedStatement statement = connection.prepareStatement(query);
+            PreparedStatement statement = connection.prepareStatement(query.body);
             ResultSet resultSet = statement.executeQuery();
             List<String> results = new ArrayList<>();
             while (resultSet.next()) {
@@ -337,21 +484,21 @@ final class Analytics {
             if (results.isEmpty()) {
                 displayNotFound();
             } else {
-                String table = joinResults(results);
+                String table = join(results);
                 System.out.println(table);
-                cache.put("5", table);
+                cache.put(query.header, table);
             }
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
     }
 
-    private void query3(String query) {
+    private void query3(Query query) {
 
-        if (applyCacheIfPresent("3")) return;
+        if (applyCacheIfPresent(query.header)) return;
 
         try {
-            PreparedStatement statement = connection.prepareStatement(query);
+            PreparedStatement statement = connection.prepareStatement(query.body);
             ResultSet resultSet = statement.executeQuery();
             List<String> results = new ArrayList<>();
             while (resultSet.next()) {
@@ -366,21 +513,21 @@ final class Analytics {
             if (results.isEmpty()) {
                 displayNotFound();
             } else {
-                String table = joinResults(results);
+                String table = join(results);
                 System.out.println(table);
-                cache.put("3", table);
+                cache.put(query.header, table);
             }
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
     }
 
-    private void query1(String query) {
+    private void query1(Query query) {
 
-        if (applyCacheIfPresent("1")) return;
+        if (applyCacheIfPresent(query.header)) return;
 
         try {
-            PreparedStatement statement = connection.prepareStatement(query);
+            PreparedStatement statement = connection.prepareStatement(query.body);
             ResultSet resultSet = statement.executeQuery();
             List<String> results = new ArrayList<>();
             while (resultSet.next()) {
@@ -394,49 +541,34 @@ final class Analytics {
                 displayNotFound();
             } else {
                 System.out.println("\n| Libary |");
-                String table = joinResults(results);
+                String table = join(results);
                 System.out.println(table);
-                cache.put("1", table);
+                cache.put(query.header, table);
             }
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
     }
+}
 
-    private String joinResults(List<String> results) {
-        return results.stream().collect(Collectors.joining(Delimiter.NEW_LINE));
-    }
+final class NumbersUtil {
 
-    private boolean applyCacheIfPresent(String key) {
-        ensureCacheRefreshed();
-        String data = cache.getOrDefault(key, null);
-        boolean result = data != null;
-        if (result) System.out.println(data);
-        return result;
-    }
-
-    private void ensureCacheRefreshed() {
-        double elapsedTimeSinceLastCacheClearedInMinutes = ((System.currentTimeMillis() - cacheLastCleared) / 1000.0) / 60;
-        if (elapsedTimeSinceLastCacheClearedInMinutes > 0.2) {
-            cache.clear();
-            cacheLastCleared = System.currentTimeMillis();
+    static boolean isInteger(String str) {
+        try {
+            Integer.parseInt(str);
+            return true;
+        } catch (NumberFormatException e) {
+            return false;
         }
     }
 
-    private static void displayReportsDirectory() {
-        System.out.println("\n         Reports Directory");
-        System.out.println("----------------------------------------");
-        System.out.println("1 - Q 1");
-        System.out.println("2 - Q 2");
-        System.out.println("3 - Q 3");
-        System.out.println("4 - Q 4");
-        System.out.println("5 - Q 5");
-        System.out.println("q - End\n");
-        System.out.println("Please make a selection");
-    }
-
-    private void displayNotFound() {
-        System.out.println("\n\n - - - No records are found - - -\n\n");
+    static boolean isDouble(String str) {
+        try {
+            Double.parseDouble(str);
+            return true;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 }
 
