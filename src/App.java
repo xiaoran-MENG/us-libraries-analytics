@@ -39,18 +39,59 @@ public final class App {
 final class Analytics {
 
     private final Connection connection;
-    
     private final Map<String, String> cache = new HashMap<>();
     private long cacheLastCleared = System.currentTimeMillis();
     private final Map<String, QueryExecutor> queryExecutors = new HashMap<>();
 
-    private static class Query {
+    public static Analytics up(String username, String password) {
+        Connection connection = null;
+
+        try {
+            connection = DriverManager.getConnection(SqlServerUtils.connectionUrl(username, password));
+        } catch (SQLException e) { }
+
+        return new Analytics(connection);
+    }
+
+    public void run() {
+        if (connection == null) {
+            System.out.println("Failed to connect to SQL Server");
+            return;
+        }
+
+        displayReportsDirectory();
+
+        Scanner scanner = new Scanner(System.in);
+        String line = scanner.nextLine();
+        while (line != null && !line.equals("q")) {
+            String[] inputs = line.trim().split(Delimiter.SPACE);
+
+            if (inputs.length == 0) {
+                displayReportsDirectory();
+                line = scanner.nextLine();
+                continue;
+            }
+
+            queryExecutors
+                .getOrDefault(inputs[0], QueryExecutor.toExecute("\nThe option is not on our directory", System.out::println))
+                .run();
+
+            displayReportsDirectory();
+            line = scanner.nextLine();
+        }
+
+        scanner.close();
+    }
+
+    private static class SqlQuery {
 
         public static final String
 
-            TEST = "select s.state_code, count(library_id) as count from libraries as l left join states as s on l.state_code = s.state_code group by s.state_code",
+            test = 
+                "select s.state_code, count(library_id) as count from libraries as l left join states as s on l.state_code = s.state_code group by s.state_code",
             
-            TOP_5000_LIBRARIES_BY_ID = "select top 5000 * from libraries where library_id = ? or library_id = ?",
+            libraries_with_id_of_this_or_that = 
+                "select library_name from libraries where library_id = ? or library_id = ?",
 
             top_10_counties_ordered_by_libraries_count_then_by_schools_count = 
                 "select top 10 " +
@@ -66,39 +107,58 @@ final class Analytics {
                 "order by libraries_count desc, schools_count desc;",
 
             libraries_ordered_by_total_operating_revenue = 
-            "select " +
-                "library_name, " +
-                "(local_government_operating_revenue + state_government_operating_revenue + federal_government_operating_revenue + other_operating_revenue) as total_operating_revenue " +
-            "from libraries " +
-            "join operating_revenues on libraries.operating_revenue_id = operating_revenues.operating_revenue_id " +
-            "order by total_operating_revenue";
+                "select " +
+                    "library_name, " +
+                    "(local_government_operating_revenue + state_government_operating_revenue + federal_government_operating_revenue + other_operating_revenue) as total_operating_revenue " +
+                "from libraries " +
+                "join operating_revenues on libraries.operating_revenue_id = operating_revenues.operating_revenue_id " +
+                "order by total_operating_revenue",
             
+            average_state_licensed_databases_per_library_for_counties_that_belong_to_states_with_less_than_5_counties = 
+                "select " +
+                    "outer_counties.county_code, " +
+                    "outer_counties.state_code, " +
+                    "sum(databases_counts.state_licensed_databases) / count(libraries.library_id) average_state_licensed_databases_per_library_for_county " +
+                "from counties as outer_counties " +
+                "join states on outer_counties.state_code = states.state_code " +
+                "join libraries on states.state_code = libraries.state_code and outer_counties.county_code = libraries.county_code " +
+                "join databases_counts on libraries.databases_count_id = databases_counts.databases_count_id " +
+                "where outer_counties.state_code in ( " +
+                    "select states.state_code " +
+                    "from states " +
+                    "join counties on states.state_code = counties.state_code " +
+                    "where states.state_code = outer_counties.state_code " +
+                    "group by states.state_code " +
+                    "having count(counties.county_code) < 5 " +
+                ") " +
+                "group by outer_counties.county_code, outer_counties.state_code " +
+                "order by average_state_licensed_databases_per_library_for_county";
     }
 
     private static class QueryExecutor {
 
         private String query;
-        private Consumer<String> executing;
-        private BiConsumer<String, String[]> executingWithArgs;
+        private Consumer<String> execution;
+        private BiConsumer<String, String[]> executionWithArgs;
         private Set<String> args = new HashSet<>();
 
-        private QueryExecutor(String query, Consumer<String> executing) {
+        private QueryExecutor(String query, Consumer<String> execution) {
             this.query = query;
-            this.executing = executing;
+            this.execution = execution;
         }
 
-        private QueryExecutor(String query, BiConsumer<String, String[]> executingWithArgs, String...args) {
+        private QueryExecutor(String query, BiConsumer<String, String[]> executionWithArgs, String...args) {
             this.query = query;
-            this.executingWithArgs = executingWithArgs;
+            this.executionWithArgs = executionWithArgs;
             Collections.addAll(this.args, args);
         }
 
-        private static QueryExecutor use(String query, Consumer<String> executing) {
-            return new QueryExecutor(query, executing);
+        private static QueryExecutor toExecute(String query, Consumer<String> execution) {
+            return new QueryExecutor(query, execution);
         }
 
-        private static QueryExecutor use(String query, BiConsumer<String, String[]> executingWithArgs, String...args) {
-            return new QueryExecutor(query, executingWithArgs, args);
+        private static QueryExecutor toExecute(String query, BiConsumer<String, String[]> executionWithArgs, String...args) {
+            return new QueryExecutor(query, executionWithArgs, args);
         }
 
         public void run() {
@@ -110,7 +170,7 @@ final class Analytics {
         }
 
         private void runQuery() {
-            Benchmark.run(() -> executing.accept(query));
+            Benchmark.run(() -> execution.accept(query));
         }
 
         private void runQueryWithArgs() {
@@ -123,7 +183,7 @@ final class Analytics {
             do {
         
                 if (this.args.size() == inputs.length) {
-                    Benchmark.run(params -> executingWithArgs.accept(query, params), inputs);
+                    Benchmark.run(params -> executionWithArgs.accept(query, params), inputs);
                     break;
                 }
         
@@ -150,7 +210,6 @@ final class Analytics {
             System.out.println("\nPlease enter a value for each of the args separated by TAB");
             args.forEach(arg -> System.out.print(arg + " "));
             System.out.println();
-            System.out.println();
         }
     }
 
@@ -160,48 +219,11 @@ final class Analytics {
     }
 
     private void registerQueryExecutors() {
-        queryExecutors.put("1", QueryExecutor.use(Query.TEST, this::query1));
-        queryExecutors.put("2", QueryExecutor.use(Query.TOP_5000_LIBRARIES_BY_ID, this::query2, "library_id1", "library_id2"));
-        queryExecutors.put("3", QueryExecutor.use(Query.top_10_counties_ordered_by_libraries_count_then_by_schools_count, this::query3));
-        queryExecutors.put("4", QueryExecutor.use(Query.libraries_ordered_by_total_operating_revenue, this::query4, "n"));
-    }
-
-    public static Analytics up(String username, String password) {
-        Connection connection = null;
-
-        try {
-            connection = DriverManager.getConnection(SqlServerUtils.connectionUrl(username, password));
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
-
-        return new Analytics(connection);
-    }
-
-    public void run() {
-
-        displayReportsDirectory();
-
-        Scanner scanner = new Scanner(System.in);
-        String line = scanner.nextLine();
-        while (line != null && !line.equals("q")) {
-            String[] inputs = line.trim().split(Delimiter.SPACE);
-
-            if (inputs.length == 0) {
-                displayReportsDirectory();
-                line = scanner.nextLine();
-                continue;
-            }
-
-            queryExecutors
-                .getOrDefault(inputs[0], QueryExecutor.use("\nThe option is not on our directory", System.out::println))
-                .run();
-
-            displayReportsDirectory();
-            line = scanner.nextLine();
-        }
-
-        scanner.close();
+        queryExecutors.put("1", QueryExecutor.toExecute(SqlQuery.test, this::query1));
+        queryExecutors.put("2", QueryExecutor.toExecute(SqlQuery.libraries_with_id_of_this_or_that, this::query2, "library_id1", "library_id2"));
+        queryExecutors.put("3", QueryExecutor.toExecute(SqlQuery.top_10_counties_ordered_by_libraries_count_then_by_schools_count, this::query3));
+        queryExecutors.put("4", QueryExecutor.toExecute(SqlQuery.libraries_ordered_by_total_operating_revenue, this::query4, "n"));
+        queryExecutors.put("5", QueryExecutor.toExecute(SqlQuery.average_state_licensed_databases_per_library_for_counties_that_belong_to_states_with_less_than_5_counties, this::query5));
     }
 
     private final static class Library {
@@ -216,6 +238,11 @@ final class Analytics {
     }
 
     private void query4(String query, String[] args) {
+        if (!isDouble(args[0])) {
+            System.out.println("\n--- The input must be numerical ---");
+            return;
+        }
+
         try {
             PreparedStatement statement = connection.prepareStatement(query);
             ResultSet resultSet = statement.executeQuery();
@@ -252,10 +279,19 @@ final class Analytics {
                     : right;
             }
 
-            System.out.println("| Library | Total Operating Revenue | n |");
+            System.out.println("\n| Library | Total Operating Revenue | n |");
             System.out.println("| " + result.name + " | " + result.totalOperatingRevenue + " | " + n + " |");
         } catch (SQLException e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    private boolean isDouble(String str) {
+        try {
+            Double.parseDouble(str);
+            return true;
+        } catch (NumberFormatException e) {
+            return false;
         }
     }
 
@@ -274,8 +310,36 @@ final class Analytics {
             if (results.isEmpty()) {
                 displayNotFound();
             } else {
-                System.out.println("| Libary |");
+                System.out.println("\n| Libary |");
                 System.out.println(joinResults(results));
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void query5(String query) {
+
+        if (applyCacheIfPresent("5")) return;
+
+        try {
+            PreparedStatement statement = connection.prepareStatement(query);
+            ResultSet resultSet = statement.executeQuery();
+            List<String> results = new ArrayList<>();
+            while (resultSet.next()) {
+                String result = "| " + 
+                    resultSet.getInt("county_code") + " | " +
+                    resultSet.getInt("state_code") + " | " +
+                    resultSet.getInt("average_state_licensed_databases_per_library_for_county") + " |";
+                results.add(result);
+            }
+
+            if (results.isEmpty()) {
+                displayNotFound();
+            } else {
+                String table = joinResults(results);
+                System.out.println(table);
+                cache.put("5", table);
             }
         } catch (SQLException e) {
             throw new RuntimeException(e);
@@ -329,7 +393,7 @@ final class Analytics {
             if (results.isEmpty()) {
                 displayNotFound();
             } else {
-                System.out.println("| Libary |");
+                System.out.println("\n| Libary |");
                 String table = joinResults(results);
                 System.out.println(table);
                 cache.put("1", table);
@@ -366,7 +430,9 @@ final class Analytics {
         System.out.println("2 - Q 2");
         System.out.println("3 - Q 3");
         System.out.println("4 - Q 4");
+        System.out.println("5 - Q 5");
         System.out.println("q - End\n");
+        System.out.println("Please make a selection");
     }
 
     private void displayNotFound() {

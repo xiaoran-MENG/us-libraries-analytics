@@ -48,3 +48,22 @@ from libraries
 join operating_revenues on libraries.operating_revenue_id = operating_revenues.operating_revenue_id
 order by total_operating_revenue 
 
+-- Average state licensed databases per library for counties that belong to states with less than 5 counties
+select 
+    outer_counties.county_code, 
+    outer_counties.state_code, 
+    sum(databases_counts.state_licensed_databases) / count(libraries.library_id) average_state_licensed_databases_per_library_for_county
+from counties as outer_counties
+join states on outer_counties.state_code = states.state_code 
+join libraries on states.state_code = libraries.state_code and outer_counties.county_code = libraries.county_code 
+join databases_counts on libraries.databases_count_id = databases_counts.databases_count_id
+where outer_counties.state_code in (
+    select states.state_code
+    from states
+    join counties on states.state_code = counties.state_code
+    where states.state_code = outer_counties.state_code 
+    group by states.state_code
+    having count(counties.county_code) < 5
+)
+group by outer_counties.county_code, outer_counties.state_code
+order by average_state_licensed_databases_per_library_for_county;
