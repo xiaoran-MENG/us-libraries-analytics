@@ -392,6 +392,7 @@ final class UsLibrariesAnalytics {
     private static final class QueryRunner {
 
         private static class Builder {
+
             private Query query;
             private Consumer<Query> running;
             private BiConsumer<Query, String[]> runningWithArgs;
@@ -457,16 +458,16 @@ final class UsLibrariesAnalytics {
         }
 
         public void run(Runnable callback) {
-            if (args.size() > 0) runQueryWithArgs(callback);
-            else runQuery(callback);
+            if (args.size() > 0) applyArgs(callback);
+            else noArgs(callback);
         }
 
-        private void runQuery(Runnable callback) {
+        private void noArgs(Runnable callback) {
             Benchmark.run(() -> running.accept(query));
             callback.run();
         }
 
-        private void runQueryWithArgs(Runnable callback) {
+        private void applyArgs(Runnable callback) {
             String[] argsArray = args.toArray(String[]::new);
 
             JTextField[] textFields = new JTextField[args.size()];
