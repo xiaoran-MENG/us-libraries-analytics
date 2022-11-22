@@ -4,6 +4,10 @@
 #### Group Members
 Xiaoran Meng, Ethan, Frieda
 
+#### Github Repository
+_Here you can view the README in Markdown_
+https://github.com/xiaoran-MENG/comp3380-group-project
+
 #### Live Demo
 ![](demo.gif)
 
