@@ -30,7 +30,7 @@ public final class App {
         JButton buttonToSeedDatabase = UI.createButton("Seed the database", seedingDatabase);
         popupToSeedDatabase.add(buttonToSeedDatabase);
 
-        UsLibrariesAnalyzer
+        UsLibrariesAnalytics
             .connectToDatabase(
                 databaseConfig.getUsername(), 
                 databaseConfig.getPassword())
@@ -106,7 +106,7 @@ final class UI extends JFrame {
 }
 
 // Queries
-final class UsLibrariesAnalyzer {
+final class UsLibrariesAnalytics {
 
     private final Map<String, CacheRecord> cache = new HashMap<>();
     private long cacheLastCleared = System.currentTimeMillis();
@@ -126,14 +126,14 @@ final class UsLibrariesAnalyzer {
     private final Connection connection;
     private final Map<Integer, QueryExecutor> queryExecutors = new HashMap<>();
 
-    public static UsLibrariesAnalyzer connectToDatabase(String username, String password) {
+    public static UsLibrariesAnalytics connectToDatabase(String username, String password) {
         Connection connection = null;
 
         try {
             connection = DriverManager.getConnection(SqlServerConnection.connectionUrl(username, password));
         } catch (SQLException e) { }
 
-        return new UsLibrariesAnalyzer(connection);
+        return new UsLibrariesAnalytics(connection);
     }
 
     public void run(Runnable disposingPopup, Runnable seedingDatabase) {
@@ -507,6 +507,10 @@ final class UsLibrariesAnalyzer {
 
                     @Override
                     public void mouseClicked(MouseEvent e) {
+                        if (field.getText().equals(arg)) {
+                            field.setText("");
+                            field.setForeground(Color.BLACK);
+                        }
                     }
 
                     @Override
@@ -543,7 +547,7 @@ final class UsLibrariesAnalyzer {
         }
     }
 
-    private UsLibrariesAnalyzer(Connection connection) {
+    private UsLibrariesAnalytics(Connection connection) {
         if (connection == null) throw new RuntimeException("Failed to connect to database");
         this.connection = connection;
         registerQueryExecutors();
@@ -603,6 +607,21 @@ final class UsLibrariesAnalyzer {
         queryExecutors.put(executor.key(), executor);
 
         executor = QueryExecutor.builder()
+            .header("Top 10 most expensive libraries to run")
+            .body(SqlQuery.top_10_most_expensive_libraries_to_run)
+            .toExecute(this::top10MostExpensiveLibrariesToRun)
+            .build();
+        queryExecutors.put(executor.key(), executor);
+
+        executor = QueryExecutor.builder()
+            .header("Staff count and staff pay per library")
+            .body(SqlQuery.staff_count_and_staff_pay_per_library)
+            .toExecute(this::staffCountAndStaffPayPerLibrary)
+            .build();
+        queryExecutors.put(executor.key(), executor);
+
+
+        executor = QueryExecutor.builder()
             .header("Library count per county")
             .body(SqlQuery.library_count_per_county)
             .toExecute(this::librariesCountForEachCounty)
@@ -622,21 +641,7 @@ final class UsLibrariesAnalyzer {
             .toExecute(this::addressForEachLibrary)
             .build();
         queryExecutors.put(executor.key(), executor);
-
-        executor = QueryExecutor.builder()
-            .header("Top 10 most expensive libraries to run")
-            .body(SqlQuery.top_10_most_expensive_libraries_to_run)
-            .toExecute(this::top10MostExpensiveLibrariesToRun)
-            .build();
-        queryExecutors.put(executor.key(), executor);
-
-        executor = QueryExecutor.builder()
-            .header("Staff count and staff pay per library")
-            .body(SqlQuery.staff_count_and_staff_pay_per_library)
-            .toExecute(this::staffCountAndStaffPayPerLibrary)
-            .build();
-        queryExecutors.put(executor.key(), executor);
-
+ 
         executor = QueryExecutor.builder()
             .header("Capital revenues of each library desc")
             .body(SqlQuery.capital_revenues_of_each_library_ordered_most_to_least)
