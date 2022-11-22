@@ -12,7 +12,7 @@ _Here you can view the hosted README_
 ![](demo.gif)  
 
 #### Programming Paradigms
-The source code was written in `Java` using _Object_Oriented_Programming_ supplemented by elements (functional interfaces) of _Functional Programming_ in `Java 8+` 
+The source code was written in `Java` using _Object_Oriented_Programming_ supplemented by elements (functional interfaces and Stream API) of _Functional Programming_ in `Java 8+` 
 
 #### Running the Analytics  
 1. Run `make` from the project folder to compile the source files 
