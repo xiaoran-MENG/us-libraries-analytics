@@ -13,34 +13,34 @@ public final class App {
 
     public static void main(String[] args) {
 
-        DatabaseConfig databaseConfig = ConfigReader.read("auth.cfg");
-        JFrame popupToSeedDatabase = UI.createCenterFrame("US Libraries Analyzer");
+        DbConfig config = ConfigReader.read("auth.cfg");
+        JFrame frame = UI.centerFrame("US Libraries Analyzer");
 
-        Runnable disposingPopupToSeedDatabase = () -> popupToSeedDatabase.dispose();
-        Runnable seedingDatabase = () -> 
-            seedDatabase(
-                databaseConfig.getUsername(), 
-                databaseConfig.getPassword(), 
+        Runnable disposing = () -> frame.dispose();
+        Runnable seedingDb = () -> 
+            seedDb(
+                config.username(), 
+                config.password(), 
                 () -> {
-                    disposingPopupToSeedDatabase.run();
+                    disposing.run();
                     System.out.println("The database is seeded succesfully\n");
                     System.out.println("Please make a selection");
                 });
 
-        JButton buttonToSeedDatabase = UI.createButton("Seed the database", seedingDatabase);
-        popupToSeedDatabase.add(buttonToSeedDatabase);
+        JButton btn = UI.button("Seed the database", seedingDb);
+        frame.add(btn);
 
         UsLibrariesAnalytics
-            .connectToDatabase(
-                databaseConfig.getUsername(), 
-                databaseConfig.getPassword())
-            .run(disposingPopupToSeedDatabase, seedingDatabase);
+            .connectToDb(
+                config.username(), 
+                config.password())
+            .run(disposing, seedingDb);
     }
 
-    private static void seedDatabase(String username, String password, Runnable callback) {
+    private static void seedDb(String username, String password, Runnable callback) {
         Benchmark.run(() -> 
-            DatabaseLoader
-                .up(SqlServerConnection.connectionUrl(username, password))
+            DbLoader
+                .up(SqlServer.connectionUrl(username, password))
                 .run());
 
         callback.run();
@@ -50,7 +50,7 @@ public final class App {
 // UI
 final class UI extends JFrame {
 
-    public static JFrame createCenterFrame(String title) {
+    public static JFrame centerFrame(String title) {
         JFrame frame = new JFrame();
         frame.setTitle(title);
         frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
@@ -61,7 +61,7 @@ final class UI extends JFrame {
         return frame;
     }
 
-    public static JFrame createFrame(String title) {
+    public static JFrame leftFrame(String title) {
         JFrame frame = new JFrame();
         frame.setTitle(title);
         frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
@@ -71,7 +71,7 @@ final class UI extends JFrame {
         return frame;
     }
 
-    public static JButton createButton(String text, Runnable action) {
+    public static JButton button(String text, Runnable action) {
         JButton button = new JButton(text);
         button.setBounds(300, 100, 250, 25);
         button.addActionListener(e -> {
@@ -82,7 +82,7 @@ final class UI extends JFrame {
         return button;
     }
 
-    public static JLabel createLabel(String text) {
+    public static JLabel label(String text) {
         JLabel label = new JLabel("query", JLabel.CENTER);
         label.setAlignmentX(0);
         label.setAlignmentY(0);
@@ -108,6 +108,8 @@ final class UI extends JFrame {
 // Queries
 final class UsLibrariesAnalytics {
 
+    private static final int DEFAULT_QUERY_RUNNER_KEY = 0;
+
     private final Map<String, CacheRecord> cache = new HashMap<>();
     private long cacheLastCleared = System.currentTimeMillis();
 
@@ -124,52 +126,49 @@ final class UsLibrariesAnalytics {
     }
 
     private final Connection connection;
-    private final Map<Integer, QueryExecutor> queryExecutors = new HashMap<>();
+    private final Map<Integer, QueryRunner> runners = new HashMap<>();
 
-    public static UsLibrariesAnalytics connectToDatabase(String username, String password) {
+    public static UsLibrariesAnalytics connectToDb(String username, String password) {
         Connection connection = null;
 
         try {
-            connection = DriverManager.getConnection(SqlServerConnection.connectionUrl(username, password));
+            connection = DriverManager.getConnection(SqlServer.connectionUrl(username, password));
         } catch (SQLException e) { }
 
         return new UsLibrariesAnalytics(connection);
     }
 
-    public void run(Runnable disposingPopup, Runnable seedingDatabase) {
+    public void run(Runnable disposing, Runnable seedingDb) {
         if (connection == null) {
             System.out.println("Failed to load the database");
             return;
         }
 
-        displayReportsDirectory();
+        reportsDirectory();
 
         Scanner scanner = new Scanner(System.in);
         String line = scanner.nextLine();
 
-        disposingPopup.run();
+        disposing.run();
 
-        if (!isDatabaseSeeded(connection)) seedingDatabase.run();
+        if (!isDbSeeded(connection)) seedingDb.run();
         
         while (line != null && !line.equals("q")) {
             String[] inputs = line.trim().split(Delimiter.SPACE);
 
             if (inputs.length == 0 || !Arithmetic.isInteger(inputs[0])) {
                 System.out.println("--- Please enter a number ---");
-                displayReportsDirectory();
+                reportsDirectory();
                 line = scanner.nextLine();
                 continue;
             }
 
-            final int 
-                queryExecutorIndex = Integer.parseInt(inputs[0]), 
-                defaultQueryExecutorIndex = 0;
-
-            queryExecutors
+            int key = Integer.parseInt(inputs[0]);
+            runners
                 .getOrDefault(
-                    queryExecutorIndex, 
-                    queryExecutors.get(defaultQueryExecutorIndex))
-                .run(() -> displayReportsDirectory());
+                    key, 
+                    runners.get(DEFAULT_QUERY_RUNNER_KEY))
+                .run(() -> reportsDirectory());
 
             line = scanner.nextLine();
         }
@@ -390,12 +389,12 @@ final class UsLibrariesAnalytics {
         }
     }
 
-    private static final class QueryExecutor {
+    private static final class QueryRunner {
 
         private static class Builder {
             private Query query;
-            private Consumer<Query> execution;
-            private BiConsumer<Query, String[]> executionWithArgs;
+            private Consumer<Query> running;
+            private BiConsumer<Query, String[]> runningWithArgs;
             private Set<String> args = new HashSet<>();
 
             public Builder() {
@@ -412,13 +411,13 @@ final class UsLibrariesAnalytics {
                 return this;
             }
 
-            public Builder toExecute(Consumer<Query> execution) {
-                this.execution = execution;
+            public Builder toRun(Consumer<Query> running) {
+                this.running = running;
                 return this;
             }
 
-            public Builder toExecute(BiConsumer<Query, String[]> executionWithArgs) {
-                this.executionWithArgs = executionWithArgs;
+            public Builder toRun(BiConsumer<Query, String[]> runningWithArgs) {
+                this.runningWithArgs = runningWithArgs;
                 return this;
             }
 
@@ -427,20 +426,20 @@ final class UsLibrariesAnalytics {
                 return this;
             }
 
-            public QueryExecutor build() {
-                return new QueryExecutor(this);
+            public QueryRunner build() {
+                return new QueryRunner(this);
             }
         }
 
         private Query query;
-        private Consumer<Query> execution;
-        private BiConsumer<Query, String[]> executionWithArgs;
+        private Consumer<Query> running;
+        private BiConsumer<Query, String[]> runningWithArgs;
         private Set<String> args = new HashSet<>();
 
-        private QueryExecutor(Builder builder) {
+        private QueryRunner(Builder builder) {
             this.query = builder.query;
-            this.execution = builder.execution;
-            this.executionWithArgs = builder.executionWithArgs;
+            this.running = builder.running;
+            this.runningWithArgs = builder.runningWithArgs;
             this.args = builder.args;
         }
 
@@ -463,7 +462,7 @@ final class UsLibrariesAnalytics {
         }
 
         private void runQuery(Runnable callback) {
-            Benchmark.run(() -> execution.accept(query));
+            Benchmark.run(() -> running.accept(query));
             callback.run();
         }
 
@@ -488,7 +487,7 @@ final class UsLibrariesAnalytics {
                         inputs[i] = textFields[i].getText();
                     }
 
-                    Benchmark.run(args -> executionWithArgs.accept(query, args), inputs);
+                    Benchmark.run(args -> runningWithArgs.accept(query, args), inputs);
                     callback.run();
                     form.dispose();
                 }
@@ -550,118 +549,118 @@ final class UsLibrariesAnalytics {
     private UsLibrariesAnalytics(Connection connection) {
         if (connection == null) throw new RuntimeException("Failed to connect to database");
         this.connection = connection;
-        registerQueryExecutors();
+        registerQueryRunners();
     }
 
-    private void registerQueryExecutors() {
+    private void registerQueryRunners() {
 
-        QueryExecutor executor = QueryExecutor.builder()
+        QueryRunner runner = QueryRunner.builder()
             .header("Default")
             .body("Option not found")
-            .toExecute(System.out::println)
+            .toRun(System.out::println)
             .build();
-        queryExecutors.put(executor.key(), executor);
+        runners.put(runner.key(), runner);
 
-        executor = QueryExecutor.builder()
+        runner = QueryRunner.builder()
             .header("Library with total operating revenue closest to n US dollars")
             .body(SqlQuery.libraries_ordered_by_total_operating_revenue)
-            .toExecute(this::librariesOrderedByTotalOperatingRevenue)
+            .toRun(this::librariesOrderedByTotalOperatingRevenue)
             .args("n")
             .build();
-        queryExecutors.put(executor.key(), executor);
+        runners.put(runner.key(), runner);
 
-        executor = QueryExecutor.builder()
+        runner = QueryRunner.builder()
             .header("Libraries with ID of id_1 or id_2")
             .body(SqlQuery.libraries_with_id_of_id1_or_id2)
-            .toExecute(this::LibrariesWithIdOfId1OrId2)
+            .toRun(this::LibrariesWithIdOfId1OrId2)
             .args("id_1 (e.g. AK0001)", "id_2 (e.g. WY0023)")
             .build();
-        queryExecutors.put(executor.key(), executor);
+        runners.put(runner.key(), runner);
 
-        executor = QueryExecutor.builder()
+        runner = QueryRunner.builder()
             .header("Average state licensed databases per library for counties that belong to states with less than 5 counties")
             .body(SqlQuery.average_state_licensed_databases_per_library_for_counties_that_belong_to_states_with_less_than_5_counties)
-            .toExecute(this::averageStateLicensedDatabasesPerLibraryForCountiesThatBelongToStatesWithLessThan5Counties)
+            .toRun(this::averageStateLicensedDatabasesPerLibraryForCountiesThatBelongToStatesWithLessThan5Counties)
             .build();
-        queryExecutors.put(executor.key(), executor);
+        runners.put(runner.key(), runner);
 
-        executor = QueryExecutor.builder()
+        runner = QueryRunner.builder()
             .header("Top 10 libraries with the highest average pay per employee")
             .body(SqlQuery.top_10_libraries_with_highest_average_pay)
-            .toExecute(this::Top10LibrariesWithHighestAveragePayPerEmployee)
+            .toRun(this::Top10LibrariesWithHighestAveragePayPerEmployee)
             .build();
-        queryExecutors.put(executor.key(), executor);
+        runners.put(runner.key(), runner);
 
-        executor = QueryExecutor.builder()
+        runner = QueryRunner.builder()
             .header("Schools with their state's total population")
             .body(SqlQuery.schools_with_state_population)
-            .toExecute(this::schoolsWithStateTotalPopulation)
+            .toRun(this::schoolsWithStateTotalPopulation)
             .build();
-        queryExecutors.put(executor.key(), executor);    
+        runners.put(runner.key(), runner);    
 
-        executor = QueryExecutor.builder()
+        runner = QueryRunner.builder()
             .header("Top 10 counties ordered by libraries count then by schools count")
             .body(SqlQuery.top_10_counties_ordered_by_libraries_count_then_by_schools_count)
-            .toExecute(this::top10CountiesOrderedByLibrariesCountThenBySchoolsCount)
+            .toRun(this::top10CountiesOrderedByLibrariesCountThenBySchoolsCount)
             .build();
-        queryExecutors.put(executor.key(), executor);
+        runners.put(runner.key(), runner);
 
-        executor = QueryExecutor.builder()
+        runner = QueryRunner.builder()
             .header("Top 10 most expensive libraries to run")
             .body(SqlQuery.top_10_most_expensive_libraries_to_run)
-            .toExecute(this::top10MostExpensiveLibrariesToRun)
+            .toRun(this::top10MostExpensiveLibrariesToRun)
             .build();
-        queryExecutors.put(executor.key(), executor);
+        runners.put(runner.key(), runner);
 
-        executor = QueryExecutor.builder()
+        runner = QueryRunner.builder()
             .header("Staff count and staff pay per library")
             .body(SqlQuery.staff_count_and_staff_pay_per_library)
-            .toExecute(this::staffCountAndStaffPayPerLibrary)
+            .toRun(this::staffCountAndStaffPayPerLibrary)
             .build();
-        queryExecutors.put(executor.key(), executor);
+        runners.put(runner.key(), runner);
 
 
-        executor = QueryExecutor.builder()
+        runner = QueryRunner.builder()
             .header("Library count per county")
             .body(SqlQuery.library_count_per_county)
-            .toExecute(this::librariesCountForEachCounty)
+            .toRun(this::librariesCountForEachCounty)
             .build();
-        queryExecutors.put(executor.key(), executor);
+        runners.put(runner.key(), runner);
         
-        executor = QueryExecutor.builder()
+        runner = QueryRunner.builder()
             .header("Database count per library")
             .body(SqlQuery.database_count_per_library)
-            .toExecute(this::databasesCountForEachLibrary)
+            .toRun(this::databasesCountForEachLibrary)
             .build();
-        queryExecutors.put(executor.key(), executor);
+        runners.put(runner.key(), runner);
 
-        executor = QueryExecutor.builder()
+        runner = QueryRunner.builder()
             .header("Address of each library")
             .body(SqlQuery.addresses_of_each_library)
-            .toExecute(this::addressForEachLibrary)
+            .toRun(this::addressForEachLibrary)
             .build();
-        queryExecutors.put(executor.key(), executor);
+        runners.put(runner.key(), runner);
  
-        executor = QueryExecutor.builder()
+        runner = QueryRunner.builder()
             .header("Capital revenues of each library desc")
             .body(SqlQuery.capital_revenues_of_each_library_ordered_most_to_least)
-            .toExecute(this::capitalRevenuesForEachLibraryDesc)
+            .toRun(this::capitalRevenuesForEachLibraryDesc)
             .build();
-        queryExecutors.put(executor.key(), executor);
+        runners.put(runner.key(), runner);
 
-        executor = QueryExecutor.builder()
+        runner = QueryRunner.builder()
             .header("Operating revenues of each library desc")
             .body(SqlQuery.operating_revenues_of_each_library_ordered_most_to_least)
-            .toExecute(this::operatingRevenuesForEachLibraryDesc)
+            .toRun(this::operatingRevenuesForEachLibraryDesc)
             .build();
-        queryExecutors.put(executor.key(), executor);
+        runners.put(runner.key(), runner);
 
-        executor = QueryExecutor.builder()
+        runner = QueryRunner.builder()
             .header("Collection expenditures of each library desc")
             .body(SqlQuery.collection_expenditures_of_each_library_ordered_most_to_least)
-            .toExecute(this::collectionExpendituresForEachLibraryDesc)
+            .toRun(this::collectionExpendituresForEachLibraryDesc)
             .build();
-        queryExecutors.put(executor.key(), executor); 
+        runners.put(runner.key(), runner); 
     }
 
     private String[][] toTableRecords(List<String[]> results) {
@@ -688,12 +687,12 @@ final class UsLibrariesAnalytics {
         }
     }
 
-    private void displayReportsDirectory() {
+    private void reportsDirectory() {
         System.out.println("\n         Reports Directory");
         System.out.println("----------------------------------------");
         
-        for (int i = 1; i < queryExecutors.values().size(); i++) {
-            System.out.println(queryExecutors.get(i));
+        for (int i = 1; i < runners.values().size(); i++) {
+            System.out.println(runners.get(i));
         }
 
         System.out.println("q - End\n");
@@ -715,7 +714,7 @@ final class UsLibrariesAnalytics {
         }
     }
 
-    private boolean isDatabaseSeeded(Connection connection) {
+    private boolean isDbSeeded(Connection connection) {
         boolean result = false;
 
         try {
@@ -1191,23 +1190,23 @@ final class Arithmetic {
 }
 
 // Data
-final class DatabaseLoader {
+final class DbLoader {
 
     private String connectionUrl;
-    private TableSeedersExecutor tableSeedersExecutor;
+    private TableSeedersRunner runner;
     
-    private DatabaseLoader(String connectionUrl) {
+    private DbLoader(String connectionUrl) {
         this.connectionUrl = connectionUrl;
-        this.tableSeedersExecutor = new TableSeedersExecutor(connectionUrl);
+        this.runner = new TableSeedersRunner(connectionUrl);
     }
 
-    public static DatabaseLoader up(String connectionUrl) {
-        return new DatabaseLoader(connectionUrl);
+    public static DbLoader up(String connectionUrl) {
+        return new DbLoader(connectionUrl);
     }
 
     public void run() {
         createTablesIfAbsent();
-        tableSeedersExecutor.run();
+        runner.run();
     }
 
     private void createTablesIfAbsent() {
@@ -1230,11 +1229,11 @@ final class DatabaseLoader {
 }
 
 // Db Seeders
-final class TableSeedersExecutor {
+final class TableSeedersRunner {
     
     private final Map<String, TableSeeder> registry = new HashMap<>();
 
-    public TableSeedersExecutor(String connectionUrl) {
+    public TableSeedersRunner(String connectionUrl) {
         registerTableSeeders(connectionUrl);
     }
 
@@ -1675,21 +1674,21 @@ final class StatesSeeder extends TableSeeder {
     }
 }
 
-final class DatabaseConfig {
+final class DbConfig {
 
     private final String username;
     private final String password;
 
-    public DatabaseConfig(String username, String password) {
+    public DbConfig(String username, String password) {
         this.username = username;
         this.password = password;
     }
 
-    public String getUsername() {
+    public String username() {
         return username;
     }
 
-    public String getPassword() {
+    public String password() {
         return password;
     }
 }
@@ -1718,7 +1717,7 @@ final class Benchmark {
     }
 }
 
-final class SqlServerConnection {
+final class SqlServer {
 
     public static String connectionUrl(String username, String password) {
         return "jdbc:sqlserver://uranium.cs.umanitoba.ca:1433;"
@@ -1754,7 +1753,7 @@ final class SqlReader {
 
 final class ConfigReader {
 
-    public static DatabaseConfig read(String file) {
+    public static DbConfig read(String file) {
 
         Properties props = new Properties();
 
@@ -1778,7 +1777,7 @@ final class ConfigReader {
             System.exit(1);
         }
 
-        return new DatabaseConfig(username, password);
+        return new DbConfig(username, password);
     }
 }
 
