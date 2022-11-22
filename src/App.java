@@ -13,31 +13,36 @@ public final class App {
 
     public static void main(String[] args) {
 
-        DbConfig config = ConfigReader.read("auth.cfg");
-        JFrame frame = UI.createCenterFrame("US Libraries Analyzer");
+        DatabaseConfig databaseConfig = ConfigReader.read("auth.cfg");
+        JFrame popupToSeedDatabase = UI.createCenterFrame("US Libraries Analyzer");
 
-        Runnable seeder = () -> seedDatabase(config.getUsername(), config.getPassword(), () -> {
-            frame.dispose();
-            System.out.println("The database is seeded succesfully\n");
-            System.out.println("Please make a selection");
-        });
+        Runnable disposingPopupToSeedDatabase = () -> popupToSeedDatabase.dispose();
+        Runnable seedingDatabase = () -> 
+            seedDatabase(
+                databaseConfig.getUsername(), 
+                databaseConfig.getPassword(), 
+                () -> {
+                    disposingPopupToSeedDatabase.run();
+                    System.out.println("The database is seeded succesfully\n");
+                    System.out.println("Please make a selection");
+                });
 
-        JButton button = UI.createButton(
-            "Seed the database", 
-            seeder);
-
-        frame.add(button);
+        JButton buttonToSeedDatabase = UI.createButton("Seed the database", seedingDatabase);
+        popupToSeedDatabase.add(buttonToSeedDatabase);
 
         UsLibrariesAnalyzer
-            .connectToDatabase(config.getUsername(), config.getPassword())
-            .run(() -> frame.dispose(), seeder);
+            .connectToDatabase(
+                databaseConfig.getUsername(), 
+                databaseConfig.getPassword())
+            .run(disposingPopupToSeedDatabase, seedingDatabase);
     }
 
     private static void seedDatabase(String username, String password, Runnable callback) {
         Benchmark.run(() -> 
             DatabaseLoader
-                .up(SqlServerUtils.connectionUrl(username, password))
+                .up(SqlServerConnection.connectionUrl(username, password))
                 .run());
+
         callback.run();
     }
 }
@@ -125,13 +130,13 @@ final class UsLibrariesAnalyzer {
         Connection connection = null;
 
         try {
-            connection = DriverManager.getConnection(SqlServerUtils.connectionUrl(username, password));
+            connection = DriverManager.getConnection(SqlServerConnection.connectionUrl(username, password));
         } catch (SQLException e) { }
 
         return new UsLibrariesAnalyzer(connection);
     }
 
-    public void run(Runnable frameDisposer, Runnable databaseSeeder) {
+    public void run(Runnable disposingPopup, Runnable seedingDatabase) {
         if (connection == null) {
             System.out.println("Failed to load the database");
             return;
@@ -141,33 +146,31 @@ final class UsLibrariesAnalyzer {
 
         Scanner scanner = new Scanner(System.in);
         String line = scanner.nextLine();
-        frameDisposer.run();
 
-        if (!isDatabaseSeeded(connection)) {
-            databaseSeeder.run();
-        }
+        disposingPopup.run();
+
+        if (!isDatabaseSeeded(connection)) seedingDatabase.run();
         
         while (line != null && !line.equals("q")) {
             String[] inputs = line.trim().split(Delimiter.SPACE);
 
-            if (inputs.length == 0) {
-                displayReportsDirectory();
-                line = scanner.nextLine();
-                continue;
-            }
-
-            String input = inputs[0];
-            if (!NumbersUtil.isInteger(input)) {
+            if (inputs.length == 0 || !Arithmetic.isInteger(inputs[0])) {
                 System.out.println("--- Please enter a number ---");
                 displayReportsDirectory();
                 line = scanner.nextLine();
                 continue;
             }
 
-            int key = Integer.parseInt(inputs[0]);
+            final int 
+                queryExecutorIndex = Integer.parseInt(inputs[0]), 
+                defaultQueryExecutorIndex = 0;
+
             queryExecutors
-                .getOrDefault(key, queryExecutors.get(0))
+                .getOrDefault(
+                    queryExecutorIndex, 
+                    queryExecutors.get(defaultQueryExecutorIndex))
                 .run(() -> displayReportsDirectory());
+
             line = scanner.nextLine();
         }
 
@@ -464,45 +467,41 @@ final class UsLibrariesAnalyzer {
             callback.run();
         }
 
-        // Do NOT touch !
-        // It works !
         private void runQueryWithArgs(Runnable callback) {
-            String[] queryArgs = args.toArray(String[]::new);
-            JTextField[] fields = new JTextField[args.size()];
-            for (int i = 0; i < fields.length; i++) {
-                fields[i] = new JTextField(15);
+            String[] argsArray = args.toArray(String[]::new);
+
+            JTextField[] textFields = new JTextField[args.size()];
+            for (int i = 0; i < textFields.length; i++) {
+                textFields[i] = new JTextField(15);
             }            
             
+            JFrame form = new JFrame();
+            form.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+            form.setSize(800, 500);
+            form.setTitle(query.header + " ( " + args.size() + " parameters)");
+
             JButton submit = new JButton("Submit");
-
-            JFrame frame = new JFrame();
-            frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
-            frame.setSize(800, 500);
-            frame.setTitle(query.header + " ( " + args.size() + " parameters)");
-
             ActionListener listener = e -> {
-                Object o = e.getSource();
-                if (o == submit) {
+                if (e.getSource() == submit) {
                     String[] inputs = new String[args.size()];
                     for (int i = 0; i < inputs.length; i++) {
-                        inputs[i] = fields[i].getText();
+                        inputs[i] = textFields[i].getText();
                     }
 
-                    Benchmark.run(params -> executionWithArgs.accept(query, params), inputs);
+                    Benchmark.run(args -> executionWithArgs.accept(query, args), inputs);
                     callback.run();
-                    frame.dispose();
+                    form.dispose();
                 }
             };
 
             submit.addActionListener(listener);
 
-            Container container = frame.getContentPane();
+            Container container = form.getContentPane();
             container.setLayout(new FlowLayout());
             
-            
-            for (int i = 0; i < fields.length; i++) {
-                JTextField field = fields[i];
-                String arg = queryArgs[i];
+            for (int i = 0; i < textFields.length; i++) {
+                JTextField field = textFields[i];
+                String arg = argsArray[i];
 
                 field.addMouseListener(new MouseListener() {
 
@@ -512,6 +511,14 @@ final class UsLibrariesAnalyzer {
 
                     @Override
                     public void mousePressed(MouseEvent e) {
+                    }
+
+                    @Override
+                    public void mouseReleased(MouseEvent e) {
+                    }
+
+                    @Override
+                    public void mouseEntered(MouseEvent e) {
                         if (field.getText().equals("")) {
                             field.setText(arg);
                             field.setForeground(Color.GRAY);
@@ -519,25 +526,11 @@ final class UsLibrariesAnalyzer {
                     }
 
                     @Override
-                    public void mouseReleased(MouseEvent e) {
+                    public void mouseExited(MouseEvent e) {
                         if (field.getText().equals(arg)) {
-                            try {
-                                // I know this line sucks
-                                Thread.sleep(500);
-                            } catch (InterruptedException e1) {
-                                e1.printStackTrace();
-                            }
                             field.setText("");
                             field.setForeground(Color.BLACK);
                         }
-                    }
-
-                    @Override
-                    public void mouseEntered(MouseEvent e) {
-                    }
-
-                    @Override
-                    public void mouseExited(MouseEvent e) {
                     }
 
                 });
@@ -546,15 +539,12 @@ final class UsLibrariesAnalyzer {
             }
 
             container.add(submit);
-            frame.setVisible(true);
+            form.setVisible(true);
         }
     }
 
     private UsLibrariesAnalyzer(Connection connection) {
-        if (connection == null) {
-            throw new RuntimeException("Failed to connect to database");
-        }
-
+        if (connection == null) throw new RuntimeException("Failed to connect to database");
         this.connection = connection;
         registerQueryExecutors();
     }
@@ -569,7 +559,7 @@ final class UsLibrariesAnalyzer {
         queryExecutors.put(executor.key(), executor);
 
         executor = QueryExecutor.builder()
-            .header("Library with total operating revenue closest to n")
+            .header("Library with total operating revenue closest to n US dollars")
             .body(SqlQuery.libraries_ordered_by_total_operating_revenue)
             .toExecute(this::librariesOrderedByTotalOperatingRevenue)
             .args("n")
@@ -577,10 +567,10 @@ final class UsLibrariesAnalyzer {
         queryExecutors.put(executor.key(), executor);
 
         executor = QueryExecutor.builder()
-            .header("Libraries with ID of library_ID_1 or library_ID_2")
+            .header("Libraries with ID of id_1 or id_2")
             .body(SqlQuery.libraries_with_id_of_id1_or_id2)
             .toExecute(this::LibrariesWithIdOfId1OrId2)
-            .args("library_ID_1 (e.g. AK0001)", "library_ID_2 (e.g. WY0023)")
+            .args("id_1 (e.g. AK0001)", "id_2 (e.g. WY0023)")
             .build();
         queryExecutors.put(executor.key(), executor);
 
@@ -736,7 +726,7 @@ final class UsLibrariesAnalyzer {
     }
 
     private void librariesOrderedByTotalOperatingRevenue(Query query, String[] args) {
-        if (!NumbersUtil.isDouble(args[0])) {
+        if (!Arithmetic.isDouble(args[0])) {
             System.out.println("\n--- The input must be numerical ---");
             return;
         }
@@ -759,19 +749,14 @@ final class UsLibrariesAnalyzer {
             while (i < j - 1) {
                 int k = i + (j - i) / 2;
                 
-                if (libraries.get(k).totalOperatingRevenue < n) {
-                    i = k;
-                } else {
-                    j = k;
-                }
+                if (libraries.get(k).totalOperatingRevenue < n) i = k;
+                else j = k;
             }
 
             Library library = null, left = libraries.get(i), right = libraries.get(j);
-            if (n < left.totalOperatingRevenue) {
-                library = left;
-            } else if (n > right.totalOperatingRevenue) {
-                library = right;
-            } else {
+            if (n < left.totalOperatingRevenue) library = left;
+            else if (n > right.totalOperatingRevenue) library = right;
+            else {
                 library = n - left.totalOperatingRevenue < right.totalOperatingRevenue - n
                     ? left
                     : right;
@@ -1179,20 +1164,20 @@ final class UsLibrariesAnalyzer {
     }
 }
 
-final class NumbersUtil {
+final class Arithmetic {
 
-    static boolean isInteger(String str) {
+    public static boolean isInteger(String value) {
         try {
-            Integer.parseInt(str);
+            Integer.parseInt(value);
             return true;
         } catch (NumberFormatException e) {
             return false;
         }
     }
 
-    static boolean isDouble(String str) {
+    public static boolean isDouble(String value) {
         try {
-            Double.parseDouble(str);
+            Double.parseDouble(value);
             return true;
         } catch (NumberFormatException e) {
             return false;
@@ -1300,11 +1285,7 @@ abstract class TableSeeder {
     public void seed() {
         try {
             Connection connection = DriverManager.getConnection(connectionUrl);
-
-            if (isTableSeeded(connection, table)) {
-                return;
-            }
-
+            if (isTableSeeded(connection, table)) return;
             runBatch(connection);
             connection.close();
         }
@@ -1582,9 +1563,8 @@ final class SchoolsSeeder extends TableSeeder {
                 String state = "";
                 while ((record = reader.readLine()) != null) {
                     String[] cells = record.trim().split(Delimiter.TAB);
-                    if (cells.length == 1) {
-                        state = cells[0];
-                    } else {
+                    if (cells.length == 1) state = cells[0];
+                    else {
                         String stateCode = stateCodes.get(states.get(state));
                         if (stateCode == null) continue;
                         String school = cells[0] + Delimiter.COMMA + cells[1] + Delimiter.COMMA + stateCodes.get(states.get(state));
@@ -1690,12 +1670,12 @@ final class StatesSeeder extends TableSeeder {
     }
 }
 
-final class DbConfig {
+final class DatabaseConfig {
 
     private final String username;
     private final String password;
 
-    public DbConfig(String username, String password) {
+    public DatabaseConfig(String username, String password) {
         this.username = username;
         this.password = password;
     }
@@ -1715,16 +1695,16 @@ final class Benchmark {
     public static <T> void run(Consumer<T> consumer, T element) {
         long start = System.currentTimeMillis();
         consumer.accept(element);
-        displayMetrics(start);
+        metrics(start);
     }
 
     public static <T> void run(Runnable action) {
         long start = System.currentTimeMillis();
         action.run();
-        displayMetrics(start);
+        metrics(start);
     }
 
-    private static void displayMetrics(long start) {
+    private static void metrics(long start) {
         double elapsed = (System.currentTimeMillis() - start) / 1000.0;
         System.out.println();
         String result = "Minutes: " + elapsed / 60 + " | " + "Seconds: " + elapsed;
@@ -1733,7 +1713,7 @@ final class Benchmark {
     }
 }
 
-final class SqlServerUtils {
+final class SqlServerConnection {
 
     public static String connectionUrl(String username, String password) {
         return "jdbc:sqlserver://uranium.cs.umanitoba.ca:1433;"
@@ -1769,13 +1749,13 @@ final class SqlReader {
 
 final class ConfigReader {
 
-    public static DbConfig read(String file) {
+    public static DatabaseConfig read(String file) {
 
-        Properties prop = new Properties();
+        Properties props = new Properties();
 
         try {
             FileInputStream configFile = new FileInputStream(file);
-            prop.load(configFile);
+            props.load(configFile);
             configFile.close();
         } catch (FileNotFoundException ex) {
             System.out.println("Could not find config file.");
@@ -1785,20 +1765,19 @@ final class ConfigReader {
             System.exit(1);
         }
         
-        String username = (prop.getProperty("username"));
-        String password = (prop.getProperty("password"));
+        String username = (props.getProperty("username"));
+        String password = (props.getProperty("password"));
 
         if (username == null || password == null){
             System.out.println("Username or password not provided.");
             System.exit(1);
         }
 
-        return new DbConfig(username, password);
+        return new DatabaseConfig(username, password);
     }
 }
 
 // Shared
-
 final class Delimiter {
     
     public static final String 
