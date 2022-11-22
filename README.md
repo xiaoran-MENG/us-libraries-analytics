@@ -25,7 +25,3 @@ Xiaoran Meng, Ethan, Frieda
 
 5. Repeat `2` until the user enters `q` 
     ![](thank-you.png)
-
-#### FAQ
-1. Why is my analytics throwing UI exceptions at startup ?
-_The desktop version of the analytics DOES work in the Linux Lab. So try to log into one of the Linux machine in the Linux Lab and run it. Alternatively, a backup Terminal version of the analytics `AppBackup.java` under `/backup` is provided. You just need to move it to the project folder and update the `makefile` to operate on `AppBackup.java`_
