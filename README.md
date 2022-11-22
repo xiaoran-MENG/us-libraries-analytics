@@ -6,7 +6,7 @@ Xiaoran Meng, Ethan, Frieda
 
 #### Github Repository
 _Here you can view the README in Markdown_
-https://github.com/xiaoran-MENG/comp3380-group-project
+**https://github.com/xiaoran-MENG/comp3380-group-project**
 
 #### Live Demo
 ![](demo.gif)
@@ -27,5 +27,5 @@ https://github.com/xiaoran-MENG/comp3380-group-project
 4. The search results are tabulated with a scrollbar on the right
     ![](table.png)
 
-5. Repeat `2` until the user enters `q` 
+5. Repeat `2` until the user enters `q`  
     ![](thank-you.png)
