@@ -1,5 +1,7 @@
 use cs3380;
 
+-- select library_name from libraries where (libraries.library_id = ? ) or (libraries.library_id = ? );
+
 -- Top 10 counties ordered by libraries count then by schools_count
 select top 10 
     counties.county_code, 
