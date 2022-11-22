@@ -12,8 +12,8 @@ _Here you can view the hosted README_
 ![](demo.gif)  
 
 #### Running the Analytics  
-1. Run `make` from the project folder  
-2. Run `make run` if step 1 is successful  
+1. Run `make` from the project folder to compile the source files 
+2. Run `make run` if the compilation is successful  
 
 #### Execution Process
 1. A popup is displayed to let the user choose whether or not to seed the database  
