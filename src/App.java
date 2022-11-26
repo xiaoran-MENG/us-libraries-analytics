@@ -749,15 +749,15 @@ final class UsLibrariesAnalytics {
                 );
             }
 
-            double n = Double.parseDouble(args[0]);
+            double n = Double.parseDouble(args[0]); // user-defined n
             int i = 0, j = libraries.size() - 1;
             while (i < j - 1) {
                 int k = i + (j - i) / 2;
-                
                 if (libraries.get(k).totalOperatingRevenue < n) i = k;
                 else j = k;
             }
 
+            // Search for the value closes to n
             Library library = null, left = libraries.get(i), right = libraries.get(j);
             if (n < left.totalOperatingRevenue) library = left;
             else if (n > right.totalOperatingRevenue) library = right;
