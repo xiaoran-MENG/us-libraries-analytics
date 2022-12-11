@@ -1,4 +1,4 @@
-# COMP 3380 Group Project  
+# COMP 3380 - Databases Concepts and Usage - Group Project  
 ## US Libraries Analytics  
 
 #### Group Members
